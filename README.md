@@ -7,7 +7,7 @@ Azure Functions service for the Manufaktura Orders system. Provides HTTP-trigger
 - **.NET 10** / Azure Functions v4 (isolated worker model)
 - **Flex Consumption** (FC1) hosting plan
 - **Managed Identity** + Microsoft Graph REST API for SharePoint file access
-- **PDFsharp** for PDF merging
+- **PdfSharpCore** for PDF merging
 - **Bicep** infrastructure-as-code
 
 ## Project Structure
