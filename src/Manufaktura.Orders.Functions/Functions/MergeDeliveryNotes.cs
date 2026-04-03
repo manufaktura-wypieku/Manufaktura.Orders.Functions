@@ -42,7 +42,11 @@ public class MergeDeliveryNotes
         if (request?.DocumentUrls is null || request.DocumentUrls.Length == 0)
         {
             _logger.LogWarning("Received merge request with no document URLs");
-            return new BadRequestObjectResult(new { error = "documentUrls array is required and must not be empty." });
+            return new BadRequestObjectResult(new
+            {
+                error = "documentUrls array is required and must not be empty.",
+                code = "missing_document_urls"
+            });
         }
 
         _logger.LogInformation("Merging {Count} delivery note documents", request.DocumentUrls.Length);
