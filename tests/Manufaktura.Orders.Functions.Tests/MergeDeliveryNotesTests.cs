@@ -5,6 +5,7 @@ using Xunit;
 using Microsoft.Extensions.Logging;
 using Microsoft.AspNetCore.Mvc;
 using NSubstitute;
+using NSubstitute.ExceptionExtensions;
 using System.Text;
 using System.Text.Json;
 
@@ -57,12 +58,65 @@ public class MergeDeliveryNotesTests
         Assert.IsType<BadRequestObjectResult>(result);
     }
 
+    [Fact]
+    public async Task ReturnsBadRequestWhenBodyIsInvalidJson()
+    {
+        var request = CreateRawHttpRequest("{ not valid json }");
+        var result = await _function.Run(request, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
+    public async Task ReturnsBadRequestWhenMergeServiceThrowsArgumentException()
+    {
+        var urls = new[] { "not-a-sharepoint-url" };
+
+        _mergeService.MergeDocumentsAsync(Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Throws(new ArgumentException("Invalid SharePoint URL format."));
+
+        var request = CreateHttpRequest(new { documentUrls = urls });
+        var result = await _function.Run(request, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        var json = JsonSerializer.Serialize(badRequest.Value);
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal("invalid_document_urls", doc.RootElement.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task ReturnsBadGatewayWhenMergeServiceThrowsHttpRequestException()
+    {
+        var urls = new[] { "https://example.sharepoint.com/sites/Site/Shared%20Documents/doc1.docx" };
+
+        _mergeService.MergeDocumentsAsync(Arg.Any<string[]>(), Arg.Any<CancellationToken>())
+            .Throws(new System.Net.Http.HttpRequestException("Graph API unreachable."));
+
+        var request = CreateHttpRequest(new { documentUrls = urls });
+        var result = await _function.Run(request, CancellationToken.None);
+
+        var objectResult = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(StatusCodes.Status502BadGateway, objectResult.StatusCode);
+        var json = JsonSerializer.Serialize(objectResult.Value);
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal("document_fetch_failed", doc.RootElement.GetProperty("code").GetString());
+    }
+
     private static HttpRequest CreateHttpRequest<T>(T body)
     {
         var context = new DefaultHttpContext();
         var request = context.Request;
         var json = JsonSerializer.Serialize(body);
         request.Body = new MemoryStream(Encoding.UTF8.GetBytes(json));
+        request.ContentType = "application/json";
+        return request;
+    }
+
+    private static HttpRequest CreateRawHttpRequest(string rawBody)
+    {
+        var context = new DefaultHttpContext();
+        var request = context.Request;
+        request.Body = new MemoryStream(Encoding.UTF8.GetBytes(rawBody));
         request.ContentType = "application/json";
         return request;
     }
