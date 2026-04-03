@@ -50,6 +50,15 @@ public class MergeDeliveryNotesTests
     }
 
     [Fact]
+    public async Task ReturnsBadRequestWhenBodyIsEmpty()
+    {
+        var request = CreateEmptyHttpRequest();
+        var result = await _function.Run(request, CancellationToken.None);
+
+        Assert.IsType<BadRequestObjectResult>(result);
+    }
+
+    [Fact]
     public async Task ReturnsBadRequestWhenBodyIsJsonNull()
     {
         var request = CreateHttpRequest<object?>(null);
@@ -80,7 +89,7 @@ public class MergeDeliveryNotesTests
         var json = JsonSerializer.Serialize(badRequest.Value);
         using var doc = JsonDocument.Parse(json);
         Assert.Equal("missing_document_urls", doc.RootElement.GetProperty("code").GetString());
-        Assert.False(string.IsNullOrWhiteSpace(doc.RootElement.GetProperty("message").GetString()));
+        Assert.False(string.IsNullOrWhiteSpace(doc.RootElement.GetProperty("error").GetString()));
     }
 
     [Fact]
@@ -116,6 +125,15 @@ public class MergeDeliveryNotesTests
         var json = JsonSerializer.Serialize(objectResult.Value);
         using var doc = JsonDocument.Parse(json);
         Assert.Equal("document_fetch_failed", doc.RootElement.GetProperty("code").GetString());
+    }
+
+    private static HttpRequest CreateEmptyHttpRequest()
+    {
+        var context = new DefaultHttpContext();
+        var request = context.Request;
+        request.Body = new MemoryStream();
+        request.ContentType = "application/json";
+        return request;
     }
 
     private static HttpRequest CreateHttpRequest<T>(T body)
