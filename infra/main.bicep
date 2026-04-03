@@ -4,6 +4,11 @@ param environmentName string
 @description('Azure region for all resources.')
 param location string = resourceGroup().location
 
+@description('Maximum number of Function App instances. Set higher for production to allow scale-out.')
+@minValue(1)
+@maxValue(1000)
+param maximumInstanceCount int = 10
+
 // Naming convention
 var suffix = 'mfk-orders-${environmentName}'
 var storageNamePrefix = toLower(replace('stmfkord${environmentName}', '-', ''))
@@ -122,7 +127,7 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         version: '10.0'
       }
       scaleAndConcurrency: {
-        maximumInstanceCount: 1
+        maximumInstanceCount: maximumInstanceCount
         instanceMemoryMB: 512
       }
     }
