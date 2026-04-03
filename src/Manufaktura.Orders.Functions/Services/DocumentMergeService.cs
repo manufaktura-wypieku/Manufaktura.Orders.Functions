@@ -26,24 +26,34 @@ public class DocumentMergeService : IDocumentMergeService
         if (documentUrls.Length == 0)
             throw new ArgumentException("At least one document URL is required.", nameof(documentUrls));
 
-        var pdfStreams = new List<MemoryStream>();
-        try
-        {
-            foreach (var url in documentUrls)
-            {
-                var pdfStream = await DownloadAsPdfAsync(url, cancellationToken);
-                pdfStreams.Add(pdfStream);
-            }
+        using var outputDocument = new PdfDocument();
 
-            return MergePdfs(pdfStreams);
-        }
-        finally
+        foreach (var url in documentUrls)
         {
-            foreach (var stream in pdfStreams)
-                stream.Dispose();
+            await using var pdfStream = await DownloadAsPdfAsync(url, cancellationToken);
+            MergePdfIntoDocument(outputDocument, pdfStream);
+        }
+
+        return SavePdfDocumentToBytes(outputDocument);
+    }
+
+    private static void MergePdfIntoDocument(PdfDocument outputDocument, Stream pdfStream)
+    {
+        pdfStream.Position = 0;
+
+        using var inputDocument = PdfReader.Open(pdfStream, PdfDocumentOpenMode.Import);
+        for (var pageIndex = 0; pageIndex < inputDocument.PageCount; pageIndex++)
+        {
+            outputDocument.AddPage(inputDocument.Pages[pageIndex]);
         }
     }
 
+    private static byte[] SavePdfDocumentToBytes(PdfDocument outputDocument)
+    {
+        using var mergedStream = new MemoryStream();
+        outputDocument.Save(mergedStream, false);
+        return mergedStream.ToArray();
+    }
     private async Task<MemoryStream> DownloadAsPdfAsync(string sharePointUrl, CancellationToken cancellationToken)
     {
         var (siteId, itemPath) = ParseSharePointUrl(sharePointUrl);
