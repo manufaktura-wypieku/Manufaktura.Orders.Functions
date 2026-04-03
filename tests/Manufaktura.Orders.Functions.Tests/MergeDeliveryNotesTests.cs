@@ -51,7 +51,7 @@ public class MergeDeliveryNotesTests
 
         using var payload = JsonDocument.Parse(JsonSerializer.Serialize(badRequest.Value));
         Assert.Equal("missing_document_urls", payload.RootElement.GetProperty("code").GetString());
-        Assert.Equal("At least one document URL must be provided.", payload.RootElement.GetProperty("error").GetString());
+        Assert.Equal("documentUrls array is required and must not be empty.", payload.RootElement.GetProperty("error").GetString());
     }
 
     [Fact]
