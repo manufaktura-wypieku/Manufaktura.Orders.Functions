@@ -43,13 +43,46 @@ public class MergeDeliveryNotes
 
         _logger.LogInformation("Merging {Count} delivery note documents", request.DocumentUrls.Length);
 
-        var pdfBytes = await _mergeService.MergeDocumentsAsync(request.DocumentUrls, cancellationToken);
-
-        _logger.LogInformation("Merge complete, output PDF is {Size} bytes", pdfBytes.Length);
-
-        return new FileContentResult(pdfBytes, "application/pdf")
+        try
         {
-            FileDownloadName = "DeliveryPack.pdf"
-        };
+            var pdfBytes = await _mergeService.MergeDocumentsAsync(request.DocumentUrls, cancellationToken);
+
+            _logger.LogInformation("Merge complete, output PDF is {Size} bytes", pdfBytes.Length);
+
+            return new FileContentResult(pdfBytes, "application/pdf")
+            {
+                FileDownloadName = "DeliveryPack.pdf"
+            };
+        }
+        catch (System.UriFormatException ex)
+        {
+            _logger.LogWarning(ex, "Received merge request with invalid document URL format");
+            return new BadRequestObjectResult(new
+            {
+                error = "One or more documentUrls values are invalid.",
+                code = "invalid_document_urls"
+            });
+        }
+        catch (ArgumentException ex)
+        {
+            _logger.LogWarning(ex, "Received merge request with invalid document URL input");
+            return new BadRequestObjectResult(new
+            {
+                error = "One or more documentUrls values are invalid.",
+                code = "invalid_document_urls"
+            });
+        }
+        catch (System.Net.Http.HttpRequestException ex)
+        {
+            _logger.LogWarning(ex, "Failed to fetch one or more documents for merge");
+            return new ObjectResult(new
+            {
+                error = "Failed to fetch one or more source documents.",
+                code = "document_fetch_failed"
+            })
+            {
+                StatusCode = StatusCodes.Status502BadGateway
+            };
+        }
     }
 }
