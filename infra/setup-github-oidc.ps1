@@ -11,15 +11,23 @@
     - GitHub CLI installed and logged in (gh auth login)
 
 .EXAMPLE
-    .\infra\setup-github-oidc.ps1
+    .\infra\setup-github-oidc.ps1 -TenantId '9096fb11-ab2c-4e04-b90c-dc3ce88d59fb' -GitHubOrg 'manufaktura-wypieku' -GitHubRepo 'Manufaktura.Orders.Functions'
 #>
+
+param(
+    [Parameter()]
+    [string]$TenantId = '9096fb11-ab2c-4e04-b90c-dc3ce88d59fb',
+
+    [Parameter()]
+    [string]$GitHubOrg = 'manufaktura-wypieku',
+
+    [Parameter()]
+    [string]$GitHubRepo = 'Manufaktura.Orders.Functions'
+)
 
 $ErrorActionPreference = 'Stop'
 
 # Configuration
-$TenantId = '9096fb11-ab2c-4e04-b90c-dc3ce88d59fb'
-$GitHubOrg = 'manufaktura-wypieku'
-$GitHubRepo = 'Manufaktura.Orders.Functions'
 $AppName = "github-$GitHubRepo"
 
 Write-Host '==> Checking Azure CLI login...'
