@@ -9,8 +9,6 @@ var builder = FunctionsApplication.CreateBuilder(args);
 builder.ConfigureFunctionsWebApplication();
 
 builder.Services.AddSingleton(new DefaultAzureCredential());
-builder.Services.AddHttpClient<DocumentMergeService>();
-builder.Services.AddSingleton<IDocumentMergeService>(sp =>
-    sp.GetRequiredService<DocumentMergeService>());
+builder.Services.AddHttpClient<IDocumentMergeService, DocumentMergeService>();
 
 builder.Build().Run();
