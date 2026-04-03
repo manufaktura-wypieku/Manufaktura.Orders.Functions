@@ -50,7 +50,7 @@ public class MergeDeliveryNotesTests
     }
 
     [Fact]
-    public async Task ReturnsBadRequestWhenBodyIsNull()
+    public async Task ReturnsBadRequestWhenBodyIsJsonNull()
     {
         var request = CreateHttpRequest<object?>(null);
         var result = await _function.Run(request, CancellationToken.None);
