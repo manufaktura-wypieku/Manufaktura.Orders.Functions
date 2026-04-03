@@ -10,6 +10,8 @@ namespace Manufaktura.Orders.Functions.Functions;
 
 public class MergeDeliveryNotes
 {
+    private const int MaxDocumentUrlCount = 50;
+
     private readonly IDocumentMergeService _mergeService;
     private readonly ILogger<MergeDeliveryNotes> _logger;
 
@@ -46,6 +48,16 @@ public class MergeDeliveryNotes
             {
                 error = "documentUrls array is required and must not be empty.",
                 code = "missing_document_urls"
+            });
+        }
+
+        if (request.DocumentUrls.Length > MaxDocumentUrlCount)
+        {
+            _logger.LogWarning("Received merge request with {Count} document URLs, exceeding the limit of {Max}", request.DocumentUrls.Length, MaxDocumentUrlCount);
+            return new BadRequestObjectResult(new
+            {
+                error = $"documentUrls must not exceed {MaxDocumentUrlCount} items.",
+                code = "too_many_document_urls"
             });
         }
 

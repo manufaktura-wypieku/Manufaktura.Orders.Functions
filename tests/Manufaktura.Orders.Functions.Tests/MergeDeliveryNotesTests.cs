@@ -8,6 +8,7 @@ using NSubstitute;
 using NSubstitute.ExceptionExtensions;
 using System.Text;
 using System.Text.Json;
+using System.Linq;
 
 namespace Manufaktura.Orders.Functions.Tests;
 
@@ -52,6 +53,20 @@ public class MergeDeliveryNotesTests
         using var payload = JsonDocument.Parse(JsonSerializer.Serialize(badRequest.Value));
         Assert.Equal("missing_document_urls", payload.RootElement.GetProperty("code").GetString());
         Assert.Equal("documentUrls array is required and must not be empty.", payload.RootElement.GetProperty("error").GetString());
+    }
+
+    [Fact]
+    public async Task ReturnsBadRequestWhenTooManyUrls()
+    {
+        var urls = Enumerable.Range(1, 51).Select(i => $"https://example.sharepoint.com/sites/Site/Shared%20Documents/doc{i}.docx").ToArray();
+        var request = CreateHttpRequest(new { documentUrls = urls });
+        var result = await _function.Run(request, CancellationToken.None);
+
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        var json = JsonSerializer.Serialize(badRequest.Value);
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal("too_many_document_urls", doc.RootElement.GetProperty("code").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(doc.RootElement.GetProperty("error").GetString()));
     }
 
     [Fact]
