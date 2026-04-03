@@ -78,9 +78,31 @@ Pushes to `main` trigger the full pipeline:
 
 ### Post-deployment
 
-The Function App's Managed Identity needs **Files.Read.All** application permission on Microsoft Graph to download SharePoint documents. Grant this via Azure AD after the first deployment:
+The Function App's Managed Identity needs the **Files.Read.All** application role on Microsoft Graph to download SharePoint documents. Because this is a managed identity (not an app registration), the role must be assigned directly to the managed identity's service principal using `az rest`.
+
+Retrieve the `managedIdentityPrincipalId` from the Bicep deployment output, then run:
 
 ```bash
-# Get the managed identity principal ID from Bicep outputs, then:
-az ad app permission admin-consent --id <app-id>
+# 1. Capture the managed identity's service principal ID (from Bicep outputs)
+MI_SP_ID="<managedIdentityPrincipalId>"
+
+# 2. Get Microsoft Graph's service principal ID in this tenant
+GRAPH_SP_ID=$(az ad sp show --id 00000003-0000-0000-c000-000000000000 --query id -o tsv)
+
+# 3. Assign the Files.Read.All app role to the managed identity
+#    App role ID 01d4889c-1287-42c6-ac1f-5d1e02578ef6 = Files.Read.All (application)
+az rest --method POST \
+  --uri "https://graph.microsoft.com/v1.0/servicePrincipals/${MI_SP_ID}/appRoleAssignments" \
+  --headers "Content-Type=application/json" \
+  --body "{
+    \"principalId\": \"${MI_SP_ID}\",
+    \"resourceId\": \"${GRAPH_SP_ID}\",
+    \"appRoleId\": \"01d4889c-1287-42c6-ac1f-5d1e02578ef6\"
+  }"
 ```
+
+Alternatively, use the Azure Portal:
+
+1. Go to **Microsoft Entra ID → Enterprise applications**.
+2. Search for the managed identity by the Function App name (or by the principal ID above).
+3. Select the managed identity → **Permissions → Grant admin consent** is not applicable here; instead open **Microsoft Graph** under Enterprise applications, go to **App roles**, and use **Grant permissions** — or use the [Graph Explorer](https://developer.microsoft.com/graph/graph-explorer) to POST the app-role assignment as above.
