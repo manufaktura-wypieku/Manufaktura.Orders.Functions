@@ -46,7 +46,12 @@ public class MergeDeliveryNotesTests
         var request = CreateHttpRequest(new { documentUrls = Array.Empty<string>() });
         var result = await _function.Run(request, CancellationToken.None);
 
-        Assert.IsType<BadRequestObjectResult>(result);
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        Assert.NotNull(badRequest.Value);
+
+        using var payload = JsonDocument.Parse(JsonSerializer.Serialize(badRequest.Value));
+        Assert.Equal("missing_document_urls", payload.RootElement.GetProperty("code").GetString());
+        Assert.Equal("At least one document URL must be provided.", payload.RootElement.GetProperty("error").GetString());
     }
 
     [Fact]
