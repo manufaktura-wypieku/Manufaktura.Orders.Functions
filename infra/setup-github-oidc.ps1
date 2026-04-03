@@ -63,30 +63,34 @@ else {
     Write-Host "    Already exists. Service Principal Object ID: $SpObjectId"
 }
 
-# Create resource groups and assign Contributor at RG scope (least privilege)
+# Create resource groups and assign roles at RG scope (least privilege)
 Write-Host ''
-Write-Host '==> Creating resource groups and assigning Contributor role (scoped per RG)...'
+Write-Host '==> Creating resource groups and assigning roles (scoped per RG)...'
 foreach ($EnvName in @('dev', 'test', 'prod')) {
     $RgName = "rg-manufaktura-orders-$EnvName"
     az group create --name $RgName --location uksouth `
         --tags "Environment=$EnvName" "Project=Manufaktura.Orders" --output none
 
-    $ExistingRole = az role assignment list `
-        --assignee $SpObjectId `
-        --role Contributor `
-        --scope "/subscriptions/$SubscriptionId/resourceGroups/$RgName" `
-        --query '[0].id' -o tsv 2>$null
-    if (-not $ExistingRole) {
-        az role assignment create `
-            --assignee-object-id $SpObjectId `
-            --assignee-principal-type ServicePrincipal `
-            --role Contributor `
+    # Contributor — create/manage Azure resources
+    # Role Based Access Control Administrator — create RBAC role assignments (needed by Bicep for storage RBAC)
+    foreach ($RoleName in @('Contributor', 'Role Based Access Control Administrator')) {
+        $ExistingRole = az role assignment list `
+            --assignee $SpObjectId `
+            --role $RoleName `
             --scope "/subscriptions/$SubscriptionId/resourceGroups/$RgName" `
-            --output none
-        Write-Host "    Assigned Contributor on: $RgName"
-    }
-    else {
-        Write-Host "    Contributor already assigned on: $RgName (skipped)"
+            --query '[0].id' -o tsv 2>$null
+        if (-not $ExistingRole) {
+            az role assignment create `
+                --assignee-object-id $SpObjectId `
+                --assignee-principal-type ServicePrincipal `
+                --role $RoleName `
+                --scope "/subscriptions/$SubscriptionId/resourceGroups/$RgName" `
+                --output none
+            Write-Host "    Assigned $RoleName on: $RgName"
+        }
+        else {
+            Write-Host "    $RoleName already assigned on: $RgName (skipped)"
+        }
     }
 }
 Write-Host '    Done.'
