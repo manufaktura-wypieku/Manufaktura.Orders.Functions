@@ -57,7 +57,7 @@ public class DocumentMergeService : IDocumentMergeService
         // Normalize path-based site identifiers to include the trailing ':' before /drive.
         var normalizedSiteId = siteId.Contains(',', StringComparison.Ordinal)
             ? siteId
-            : siteId.EndsWith(':', StringComparison.Ordinal) ? siteId : $"{siteId}:";
+            : siteId.EndsWith(":", StringComparison.Ordinal) ? siteId : $"{siteId}:";
 
         // Encode each path segment individually so '/' delimiters are preserved.
         var encodedPath = string.Join("/", itemPath.Split('/').Select(Uri.EscapeDataString));
@@ -85,7 +85,7 @@ public class DocumentMergeService : IDocumentMergeService
 
         var sitesIndex = Array.FindIndex(segments, s => s.Equals("sites", StringComparison.OrdinalIgnoreCase));
         if (sitesIndex < 0 || sitesIndex + 1 >= segments.Length)
-            throw new ArgumentException($"Cannot parse SharePoint site from URL: {url}");
+            throw new ArgumentException($"Cannot parse SharePoint site from URL: host={uri.Host}");
 
         var siteName = segments[sitesIndex + 1];
         var siteId = $"{host}:/sites/{siteName}";
@@ -97,7 +97,7 @@ public class DocumentMergeService : IDocumentMergeService
             s.Equals("Shared%20Documents", StringComparison.OrdinalIgnoreCase));
 
         if (docsIndex < 0)
-            throw new ArgumentException($"Cannot find 'Shared Documents' in URL: {url}");
+            throw new ArgumentException($"Cannot find 'Shared Documents' in URL: host={uri.Host}, site={siteName}");
 
         // Path relative to drive root (Shared Documents IS the drive root)
         var itemPath = string.Join("/", pathSegments.Skip(docsIndex + 1));
