@@ -1,0 +1,142 @@
+@description('Environment name used as suffix for all resources.')
+param environmentName string
+
+@description('Azure region for all resources.')
+param location string = resourceGroup().location
+
+// Naming convention
+var suffix = 'mfk-orders-${environmentName}'
+var storageNamePrefix = toLower(replace('stmfkord${environmentName}', '-', ''))
+var storageName = substring('${storageNamePrefix}${uniqueString(resourceGroup().id)}', 0, 24)
+var functionAppName = 'func-${suffix}'
+var appServicePlanName = 'asp-${suffix}'
+var appInsightsName = 'ai-${suffix}'
+var logAnalyticsName = 'log-${suffix}'
+
+// Common tags for cost filtering
+var tags = {
+  Environment: environmentName
+  Project: 'Manufaktura.Orders'
+}
+
+// Log Analytics workspace for Application Insights
+resource logAnalytics 'Microsoft.OperationalInsights/workspaces@2023-09-01' = {
+  name: logAnalyticsName
+  location: location
+  tags: tags
+  properties: {
+    sku: {
+      name: 'PerGB2018'
+    }
+    retentionInDays: 30
+  }
+}
+
+// Application Insights
+resource appInsights 'Microsoft.Insights/components@2020-02-02' = {
+  name: appInsightsName
+  location: location
+  tags: tags
+  kind: 'web'
+  properties: {
+    Application_Type: 'web'
+    WorkspaceResourceId: logAnalytics.id
+  }
+}
+
+// Storage account (required by Azure Functions)
+resource storageAccount 'Microsoft.Storage/storageAccounts@2023-05-01' = {
+  name: storageName
+  location: location
+  tags: tags
+  sku: {
+    name: 'Standard_LRS'
+  }
+  kind: 'StorageV2'
+  properties: {
+    supportsHttpsTrafficOnly: true
+    minimumTlsVersion: 'TLS1_2'
+    allowBlobPublicAccess: false
+  }
+}
+
+// Flex Consumption plan (per-second billing, faster cold starts)
+resource appServicePlan 'Microsoft.Web/serverfarms@2024-04-01' = {
+  name: appServicePlanName
+  location: location
+  tags: tags
+  sku: {
+    name: 'FC1'
+    tier: 'FlexConsumption'
+  }
+  properties: {
+    reserved: true // Linux required for Flex Consumption
+  }
+}
+
+// Storage container for Flex Consumption deployment packages
+resource deploymentContainer 'Microsoft.Storage/storageAccounts/blobServices/containers@2023-05-01' = {
+  name: '${storageAccount.name}/default/deploymentpackage'
+  properties: {
+    publicAccess: 'None'
+  }
+}
+
+// Function App with system-assigned Managed Identity
+resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
+  name: functionAppName
+  location: location
+  tags: tags
+  kind: 'functionapp,linux'
+  identity: {
+    type: 'SystemAssigned'
+  }
+  properties: {
+    serverFarmId: appServicePlan.id
+    httpsOnly: true
+    siteConfig: {
+      appSettings: [
+        {
+          name: 'AzureWebJobsStorage'
+          value: 'DefaultEndpointsProtocol=https;AccountName=${storageAccount.name};EndpointSuffix=${environment().suffixes.storage};AccountKey=${storageAccount.listKeys().keys[0].value}'
+        }
+        {
+          name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
+          value: appInsights.properties.ConnectionString
+        }
+      ]
+    }
+    functionAppConfig: {
+      deployment: {
+        storage: {
+          type: 'blobContainer'
+          value: '${storageAccount.properties.primaryEndpoints.blob}deploymentpackage'
+          authentication: {
+            type: 'StorageAccountConnectionString'
+            storageAccountConnectionStringName: 'AzureWebJobsStorage'
+          }
+        }
+      }
+      runtime: {
+        name: 'dotnet-isolated'
+        version: '10.0'
+      }
+      scaleAndConcurrency: {
+        maximumInstanceCount: 1
+        instanceMemoryMB: 512
+      }
+    }
+  }
+  dependsOn: [
+    deploymentContainer
+  ]
+}
+
+@description('Function App name for deployment.')
+output functionAppName string = functionApp.name
+
+@description('Function App default hostname.')
+output functionAppHostname string = functionApp.properties.defaultHostName
+
+@description('Managed Identity principal ID — grant this Files.Read.All on Microsoft Graph for SharePoint access.')
+output managedIdentityPrincipalId string = functionApp.identity.principalId

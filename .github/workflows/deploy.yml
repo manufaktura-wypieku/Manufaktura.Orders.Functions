@@ -1,0 +1,74 @@
+name: Deploy Environment
+
+on:
+  workflow_call:
+    inputs:
+      environment:
+        description: "GitHub environment name (dev, test, production)"
+        required: true
+        type: string
+      env_name:
+        description: "Short environment name for resource naming (dev, test, prod)"
+        required: true
+        type: string
+    secrets:
+      AZURE_CLIENT_ID:
+        required: true
+      AZURE_TENANT_ID:
+        required: true
+      AZURE_SUBSCRIPTION_ID:
+        required: true
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    environment: ${{ inputs.environment }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: function-app
+          path: .
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Ensure Resource Group
+        run: az group create --name "rg-manufaktura-orders-${{ inputs.env_name }}" --location uksouth --tags Environment=${{ inputs.env_name }} Project=Manufaktura.Orders
+
+      - name: Deploy Bicep
+        id: bicep
+        uses: azure/arm-deploy@v2
+        with:
+          resourceGroupName: rg-manufaktura-orders-${{ inputs.env_name }}
+          template: infra/main.bicep
+          parameters: infra/main.${{ inputs.env_name }}.bicepparam
+          failOnStdErr: false
+
+      - name: Deploy to Azure Functions (Flex Consumption)
+        run: |
+          set +e
+          output=$(az functionapp deployment source config-zip \
+            --resource-group rg-manufaktura-orders-${{ inputs.env_name }} \
+            --name ${{ steps.bicep.outputs.functionAppName }} \
+            --src function.zip \
+            --build-remote false 2>&1)
+          exit_code=$?
+          echo "$output"
+          if [ $exit_code -ne 0 ]; then
+            if echo "$output" | grep -q "partially successful"; then
+              echo "Deployment accepted (Flex Consumption log polling unavailable — expected behavior)"
+              exit 0
+            fi
+            exit $exit_code
+          fi

@@ -1,0 +1,117 @@
+name: CI/CD
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  FUNCTION_PROJECT: "src/Manufaktura.Orders.Functions/Manufaktura.Orders.Functions.csproj"
+  TEST_PROJECT: "tests/Manufaktura.Orders.Functions.Tests/Manufaktura.Orders.Functions.Tests.csproj"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore ${{ env.FUNCTION_PROJECT }}
+
+      - name: Build
+        run: dotnet build ${{ env.FUNCTION_PROJECT }} --configuration Release --no-restore
+
+      - name: Test
+        run: dotnet test ${{ env.TEST_PROJECT }} --configuration Release --verbosity normal
+
+      - name: Publish
+        run: dotnet publish ${{ env.FUNCTION_PROJECT }} --configuration Release --output ./publish
+
+      - name: Prepare Flex Consumption package structure
+        run: |
+          mkdir -p ./publish/.azurefunctions
+          [ -f ./publish/functions.metadata ] && mv ./publish/functions.metadata ./publish/.azurefunctions/
+
+      - name: Zip function app
+        run: cd publish && zip -r ../function.zip .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: function-app
+          path: function.zip
+
+  deploy-dev:
+    needs: build-and-test
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: dev
+      env_name: dev
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+  deploy-test:
+    needs: deploy-dev
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: test
+      env_name: test
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+  approve-prod:
+    needs: deploy-test
+    runs-on: ubuntu-latest
+    permissions:
+      issues: write
+    steps:
+      - name: Await manual approval for production deployment
+        uses: trstringer/manual-approval@v1
+        with:
+          secret: ${{ secrets.GITHUB_TOKEN }}
+          approvers: mbochenko
+          minimum-approvals: 1
+          issue-title: "Approve production deployment"
+          issue-body: "CI passed and dev/test deployments succeeded. Approve to deploy to production."
+
+  deploy-prod:
+    needs: approve-prod
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: production
+      env_name: prod
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
