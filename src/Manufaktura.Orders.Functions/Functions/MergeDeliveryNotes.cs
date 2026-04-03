@@ -32,7 +32,7 @@ public class MergeDeliveryNotes
         catch (JsonException ex)
         {
             _logger.LogWarning(ex, "Failed to deserialize merge request body");
-            return new BadRequestObjectResult(new { error = "Request body contains invalid JSON." });
+            return new BadRequestObjectResult(new { error = $"Request body contains invalid JSON: {ex.Message}" });
         }
 
         if (request?.DocumentUrls is null || request.DocumentUrls.Length == 0)
