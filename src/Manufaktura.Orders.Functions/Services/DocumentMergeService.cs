@@ -52,12 +52,14 @@ public class DocumentMergeService : IDocumentMergeService
             new TokenRequestContext(GraphScopes), cancellationToken);
 
         // Graph REST API: GET /sites/{siteId}/drive/root:/{path}:/content?format=pdf
-        var graphUrl = $"https://graph.microsoft.com/v1.0/sites/{siteId}/drive/root:/{Uri.EscapeDataString(itemPath)}:/content?format=pdf";
+        // Encode each path segment individually so '/' delimiters are preserved.
+        var encodedPath = string.Join("/", itemPath.Split('/').Select(Uri.EscapeDataString));
+        var graphUrl = $"https://graph.microsoft.com/v1.0/sites/{siteId}/drive/root:/{encodedPath}:/content?format=pdf";
 
         using var request = new HttpRequestMessage(HttpMethod.Get, graphUrl);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
 
-        var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
+        using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         var memoryStream = new MemoryStream();

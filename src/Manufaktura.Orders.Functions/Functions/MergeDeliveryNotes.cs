@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
+using System.Text.Json;
 
 namespace Manufaktura.Orders.Functions.Functions;
 
@@ -23,7 +24,16 @@ public class MergeDeliveryNotes
         [HttpTrigger(AuthorizationLevel.Function, "post")] HttpRequest req,
         CancellationToken cancellationToken)
     {
-        var request = await req.ReadFromJsonAsync<MergeRequest>(cancellationToken);
+        MergeRequest? request;
+        try
+        {
+            request = await req.ReadFromJsonAsync<MergeRequest>(cancellationToken);
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogWarning(ex, "Failed to deserialize merge request body");
+            return new BadRequestObjectResult(new { error = "Request body contains invalid JSON." });
+        }
 
         if (request?.DocumentUrls is null || request.DocumentUrls.Length == 0)
         {
