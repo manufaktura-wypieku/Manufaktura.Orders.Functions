@@ -1,8 +1,8 @@
 using System.Net.Http.Headers;
 using Azure.Core;
 using Azure.Identity;
-using PdfSharp.Pdf;
-using PdfSharp.Pdf.IO;
+using PdfSharpCore.Pdf;
+using PdfSharpCore.Pdf.IO;
 
 namespace Manufaktura.Orders.Functions.Services;
 
