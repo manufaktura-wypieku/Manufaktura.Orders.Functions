@@ -115,22 +115,4 @@ public class DocumentMergeService : IDocumentMergeService
 
         return (siteId, itemPath);
     }
-
-    private static byte[] MergePdfs(List<MemoryStream> pdfStreams)
-    {
-        using var outputDocument = new PdfDocument();
-
-        foreach (var stream in pdfStreams)
-        {
-            using var inputDocument = PdfReader.Open(stream, PdfDocumentOpenMode.Import);
-            for (var i = 0; i < inputDocument.PageCount; i++)
-            {
-                outputDocument.AddPage(inputDocument.Pages[i]);
-            }
-        }
-
-        using var outputStream = new MemoryStream();
-        outputDocument.Save(outputStream);
-        return outputStream.ToArray();
-    }
 }
