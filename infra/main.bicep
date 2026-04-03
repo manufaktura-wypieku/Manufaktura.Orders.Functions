@@ -1,4 +1,5 @@
 @description('Environment name used as suffix for all resources.')
+@allowed(['dev', 'test', 'prod'])
 param environmentName string
 
 @description('Azure region for all resources.')
