@@ -76,7 +76,7 @@ public class DocumentMergeService : IDocumentMergeService
 
         var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
 
-        var sitesIndex = Array.IndexOf(segments, "sites");
+        var sitesIndex = Array.FindIndex(segments, s => s.Equals("sites", StringComparison.OrdinalIgnoreCase));
         if (sitesIndex < 0 || sitesIndex + 1 >= segments.Length)
             throw new ArgumentException($"Cannot parse SharePoint site from URL: {url}");
 
