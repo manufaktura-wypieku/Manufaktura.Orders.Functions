@@ -21,6 +21,8 @@ public class DocumentMergeService : IDocumentMergeService
 
     public async Task<byte[]> MergeDocumentsAsync(string[] documentUrls, CancellationToken cancellationToken = default)
     {
+        if (documentUrls is null)
+            throw new ArgumentNullException(nameof(documentUrls));
         if (documentUrls.Length == 0)
             throw new ArgumentException("At least one document URL is required.", nameof(documentUrls));
 
