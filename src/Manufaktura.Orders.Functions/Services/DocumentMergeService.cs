@@ -109,8 +109,12 @@ public class DocumentMergeService : IDocumentMergeService
         if (docsIndex < 0)
             throw new ArgumentException($"Cannot find 'Shared Documents' in URL: host={uri.Host}, site={siteName}");
 
+        var itemPathSegments = pathSegments.Skip(docsIndex + 1).ToArray();
+        if (itemPathSegments.Length == 0)
+            throw new ArgumentException($"Document path is missing after 'Shared Documents' in URL: host={uri.Host}, site={siteName}");
+
         // Path relative to drive root (Shared Documents IS the drive root)
-        var itemPath = string.Join("/", pathSegments.Skip(docsIndex + 1));
+        var itemPath = string.Join("/", itemPathSegments);
         itemPath = Uri.UnescapeDataString(itemPath);
 
         return (siteId, itemPath);
