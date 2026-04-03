@@ -6,7 +6,7 @@ param location string = resourceGroup().location
 
 @description('Maximum number of Function App instances. Set higher for production to allow scale-out.')
 @minValue(1)
-@maxValue(1000)
+@maxValue(200)
 param maximumInstanceCount int = 10
 
 // Naming convention
