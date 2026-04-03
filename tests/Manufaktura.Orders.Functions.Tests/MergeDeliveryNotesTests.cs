@@ -22,7 +22,7 @@ public class MergeDeliveryNotesTests
     }
 
     [Fact]
-    public async Task ReturnssPdfWhenDocumentsProvided()
+    public async Task ReturnsPdfWhenDocumentsProvided()
     {
         var urls = new[] { "https://example.sharepoint.com/sites/Site/Shared%20Documents/doc1.docx" };
         var expectedPdf = new byte[] { 0x25, 0x50, 0x44, 0x46 }; // %PDF header
