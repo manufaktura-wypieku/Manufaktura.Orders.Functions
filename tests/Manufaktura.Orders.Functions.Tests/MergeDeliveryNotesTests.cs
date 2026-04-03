@@ -64,6 +64,18 @@ public class MergeDeliveryNotesTests
         var request = CreateRawHttpRequest("{ not valid json }");
         var result = await _function.Run(request, CancellationToken.None);
 
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        var json = JsonSerializer.Serialize(badRequest.Value);
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal("invalid_json", doc.RootElement.GetProperty("code").GetString());
+    }
+
+    [Fact]
+    public async Task ReturnsBadRequestWhenDocumentUrlsPropertyIsMissing()
+    {
+        var request = CreateRawHttpRequest("{}");
+        var result = await _function.Run(request, CancellationToken.None);
+
         Assert.IsType<BadRequestObjectResult>(result);
     }
 
