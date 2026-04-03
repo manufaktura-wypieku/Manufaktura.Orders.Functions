@@ -17,7 +17,6 @@
     <PackageReference Include="Microsoft.Azure.Functions.Worker.Sdk" Version="2.0.7" OutputItemType="Analyzer" GeneratePathProperty="true">
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
-    <PackageReference Include="Microsoft.Extensions.Http.Resilience" Version="10.4.0" />
     <PackageReference Include="PDFsharp" Version="6.2.0" />
   </ItemGroup>
   <ItemGroup>
