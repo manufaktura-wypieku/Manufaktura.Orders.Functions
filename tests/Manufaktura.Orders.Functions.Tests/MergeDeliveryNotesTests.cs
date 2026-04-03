@@ -76,7 +76,11 @@ public class MergeDeliveryNotesTests
         var request = CreateRawHttpRequest("{}");
         var result = await _function.Run(request, CancellationToken.None);
 
-        Assert.IsType<BadRequestObjectResult>(result);
+        var badRequest = Assert.IsType<BadRequestObjectResult>(result);
+        var json = JsonSerializer.Serialize(badRequest.Value);
+        using var doc = JsonDocument.Parse(json);
+        Assert.Equal("missing_document_urls", doc.RootElement.GetProperty("code").GetString());
+        Assert.False(string.IsNullOrWhiteSpace(doc.RootElement.GetProperty("message").GetString()));
     }
 
     [Fact]
