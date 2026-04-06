@@ -61,6 +61,38 @@ public class GenerateDeliveryPackTests
     }
 
     [Fact]
+    public async Task ReturnsSkippedWhenOrderCountIsZero()
+    {
+        SetupNote();
+        SetupCounts(orderCount: 0, noteCount: 0);
+
+        var request = CreateHttpRequest(new { deliveryNoteId = NoteId });
+        var result = await _function.Run(request, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        AssertStatus(ok.Value, "skipped");
+        AssertCode(ok.Value, "no_orders");
+        await _dataverse.DidNotReceive().GetDeliveryPackAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ReturnsSkippedWhenDocumentUrlsIsEmpty()
+    {
+        SetupNote();
+        SetupCounts(orderCount: 2, noteCount: 2);
+        _dataverse.GetDeliveryPackAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>()).Returns((DeliveryPackRecord?)null);
+        _dataverse.GetDeliveryNoteUrlsAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>()).Returns([]);
+
+        var request = CreateHttpRequest(new { deliveryNoteId = NoteId });
+        var result = await _function.Run(request, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        AssertStatus(ok.Value, "skipped");
+        AssertCode(ok.Value, "no_document_urls");
+        await _dataverse.DidNotReceive().CreateDeliveryPackAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task ReturnsSkippedWhenNotAllNotesAreReady()
     {
         SetupNote();

@@ -79,26 +79,45 @@ public class GenerateDeliveryPack
         var noteCount = await _dataverse.CountDeliveryNotesWithUrlAsync(note.RouteId, note.DeliveryDate, cancellationToken);
         _logger.LogInformation("Delivery notes with URL for route {RouteId} on {Date}: {Count}", note.RouteId, note.DeliveryDate.Date, noteCount);
 
-        // Step 4: Exit if not all delivery notes are ready.
+        // Step 4: Exit if there are no completed orders for this route/date.
+        if (orderCount == 0)
+        {
+            _logger.LogInformation("No completed orders for route {RouteId} on {Date}. Exiting.", note.RouteId, note.DeliveryDate.Date);
+            return new OkObjectResult(new { status = "skipped", reason = "no_orders", orderCount });
+        }
+
+        // Step 5: Exit if not all delivery notes are ready.
         if (noteCount < orderCount)
         {
             _logger.LogInformation("Not all delivery notes ready ({NoteCount}/{OrderCount}). Exiting.", noteCount, orderCount);
             return new OkObjectResult(new { status = "skipped", reason = "not_all_notes_ready", noteCount, orderCount });
         }
 
-        // Step 5: Upsert delivery pack (query first, then create or update).
+        // Step 6: Check for an existing delivery pack (for the concurrency guard).
         var existingPack = await _dataverse.GetDeliveryPackAsync(note.RouteId, note.DeliveryDate, cancellationToken);
+
+        if (existingPack is not null && existingPack.StatusCode == DeliveryPackStatus.Generating)
+        {
+            _logger.LogInformation("Delivery pack {PackId} is already Generating. Exiting.", existingPack.Id);
+            return new OkObjectResult(new { status = "skipped", reason = "already_generating", packId = existingPack.Id });
+        }
+
+        // Step 7: Collect all delivery note document URLs before creating/updating the pack,
+        //         so we can skip cleanly if no URLs are available.
+        var documentUrls = await _dataverse.GetDeliveryNoteUrlsAsync(note.RouteId, note.DeliveryDate, cancellationToken);
+        _logger.LogInformation("Found {Count} delivery note document URLs for route {RouteId} on {Date}.", documentUrls.Length, note.RouteId, note.DeliveryDate.Date);
+
+        if (documentUrls.Length == 0)
+        {
+            _logger.LogInformation("No document URLs found for route {RouteId} on {Date}. Exiting.", note.RouteId, note.DeliveryDate.Date);
+            return new OkObjectResult(new { status = "skipped", reason = "no_document_urls" });
+        }
+
+        // Step 8: Upsert delivery pack (create or update to Generating).
         Guid packId;
 
         if (existingPack is not null)
         {
-            // Step 6: Concurrency guard — exit if already generating.
-            if (existingPack.StatusCode == DeliveryPackStatus.Generating)
-            {
-                _logger.LogInformation("Delivery pack {PackId} is already Generating. Exiting.", existingPack.Id);
-                return new OkObjectResult(new { status = "skipped", reason = "already_generating", packId = existingPack.Id });
-            }
-
             packId = existingPack.Id;
             await _dataverse.SetDeliveryPackGeneratingAsync(packId, noteCount, cancellationToken);
             _logger.LogInformation("Updated existing delivery pack {PackId} to Generating with {NoteCount} notes.", packId, noteCount);
@@ -111,21 +130,18 @@ public class GenerateDeliveryPack
 
         try
         {
-            // Step 7: Collect all delivery note document URLs.
-            var documentUrls = await _dataverse.GetDeliveryNoteUrlsAsync(note.RouteId, note.DeliveryDate, cancellationToken);
+            // Step 9: Merge documents into a single PDF.
             _logger.LogInformation("Merging {Count} delivery note documents for pack {PackId}.", documentUrls.Length, packId);
-
-            // Step 8: Merge documents into a single PDF.
             var pdfBytes = await _mergeService.MergeDocumentsAsync(documentUrls, cancellationToken);
             _logger.LogInformation("Merge complete: {Size} bytes for pack {PackId}.", pdfBytes.Length, packId);
 
-            // Step 9: Upload merged PDF to SharePoint /DeliveryPacks/{RouteName}/
+            // Step 10: Upload merged PDF to SharePoint /DeliveryPacks/{RouteName}/
             var routeName = await _dataverse.GetDeliveryRouteNameAsync(note.RouteId, cancellationToken)
                             ?? note.RouteId.ToString("D");
             var sharePointUrl = await _sharePoint.UploadDeliveryPackAsync(routeName, note.DeliveryDate, pdfBytes, cancellationToken);
             _logger.LogInformation("Uploaded delivery pack PDF to {Url} for pack {PackId}.", sharePointUrl, packId);
 
-            // Step 10: Update delivery pack record to Complete.
+            // Step 11: Update delivery pack record to Complete.
             await _dataverse.UpdateDeliveryPackCompleteAsync(packId, sharePointUrl, documentUrls.Length, DateTimeOffset.UtcNow, cancellationToken);
             _logger.LogInformation("Delivery pack {PackId} marked Complete.", packId);
 
