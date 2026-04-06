@@ -119,12 +119,12 @@ public class GenerateDeliveryPack
         if (existingPack is not null)
         {
             packId = existingPack.Id;
-            await _dataverse.SetDeliveryPackGeneratingAsync(packId, noteCount, cancellationToken);
-            _logger.LogInformation("Updated existing delivery pack {PackId} to Generating with {NoteCount} notes.", packId, noteCount);
+            await _dataverse.SetDeliveryPackGeneratingAsync(packId, documentUrls.Length, cancellationToken);
+            _logger.LogInformation("Updated existing delivery pack {PackId} to Generating with {NoteCount} notes.", packId, documentUrls.Length);
         }
         else
         {
-            packId = await _dataverse.CreateDeliveryPackAsync(note.RouteId, note.DeliveryDate, noteCount, cancellationToken);
+            packId = await _dataverse.CreateDeliveryPackAsync(note.RouteId, note.DeliveryDate, documentUrls.Length, cancellationToken);
             _logger.LogInformation("Created new delivery pack {PackId} for route {RouteId} on {Date}.", packId, note.RouteId, note.DeliveryDate.Date);
         }
 

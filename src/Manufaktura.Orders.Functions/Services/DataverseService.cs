@@ -41,27 +41,48 @@ public class DataverseService : IDataverseService
 
     public async Task<int> CountCompletedOrdersByRouteAndDateAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default)
     {
-        // Orders are linked to accounts (via mb_customer). Accounts have mb_deliveryroute.
-        // Step 1: find accounts that belong to this route.
-        var accountIds = await GetAccountIdsByRouteAsync(routeId, cancellationToken);
-        if (accountIds.Length == 0)
-            return 0;
-
-        // Step 2: count inactive (statecode = 1) orders for those accounts on the delivery date.
+        // Use FetchXML with a link-entity join to filter orders by the account's delivery route,
+        // avoiding URL-length issues from expanding all account IDs into an OData OR filter.
         var dateFrom = deliveryDate.Date.ToString("yyyy-MM-dd");
         var dateTo = deliveryDate.Date.AddDays(1).ToString("yyyy-MM-dd");
 
-        var accountFilter = string.Join(" or ", accountIds.Select(id => $"_mb_customerid_value eq {id:D}"));
-        var filter = $"statecode eq 1" +
-                     $" and mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z" +
-                     $" and ({accountFilter})";
+        var fetchXml =
+            $"""
+            <fetch aggregate='true'>
+              <entity name='mb_order'>
+                <attribute name='mb_orderid' alias='ordercount' aggregate='count' />
+                <filter type='and'>
+                  <condition attribute='statecode' operator='eq' value='1' />
+                  <condition attribute='mb_deliverydate' operator='on-or-after' value='{dateFrom}' />
+                  <condition attribute='mb_deliverydate' operator='before' value='{dateTo}' />
+                </filter>
+                <link-entity name='account' from='accountid' to='mb_customerid' link-type='inner'>
+                  <filter type='and'>
+                    <condition attribute='mb_deliveryroute' operator='eq' value='{routeId:D}' />
+                  </filter>
+                </link-entity>
+              </entity>
+            </fetch>
+            """;
 
-        var url = $"{_dataverseUrl}/api/data/v9.2/mb_orders?$filter={Uri.EscapeDataString(filter)}&$count=true&$select=mb_orderid&$top=1";
+        var url = $"{_dataverseUrl}/api/data/v9.2/mb_orders?fetchXml={Uri.EscapeDataString(fetchXml)}";
         using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-        return doc.RootElement.TryGetProperty("@odata.count", out var countProp) ? countProp.GetInt32() : 0;
+        if (!doc.RootElement.TryGetProperty("value", out var valueProp) || valueProp.GetArrayLength() == 0)
+            return 0;
+
+        var firstRow = valueProp[0];
+        if (!firstRow.TryGetProperty("ordercount", out var countProp))
+            return 0;
+
+        return countProp.ValueKind switch
+        {
+            JsonValueKind.Number => countProp.GetInt32(),
+            JsonValueKind.String when int.TryParse(countProp.GetString(), out var count) => count,
+            _ => 0
+        };
     }
 
     public async Task<int> CountDeliveryNotesWithUrlAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default)
@@ -71,7 +92,7 @@ public class DataverseService : IDataverseService
 
         var filter = $"_mb_deliveryroute_value eq {routeId:D}" +
                      $" and mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z" +
-                     $" and mb_url ne null";
+                     $" and mb_url ne null and mb_url ne ''";
 
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes?$filter={Uri.EscapeDataString(filter)}&$count=true&$select=mb_deliverynoteid&$top=1";
         using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
@@ -120,6 +141,15 @@ public class DataverseService : IDataverseService
 
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverypacks";
         using var response = await SendAsync(HttpMethod.Post, url, body, cancellationToken);
+
+        // 409 Conflict: a concurrent request already created the pack; re-query and return its ID.
+        if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+        {
+            var existing = await GetDeliveryPackAsync(routeId, deliveryDate, cancellationToken)
+                ?? throw new InvalidOperationException("Dataverse returned 409 Conflict but no delivery pack was found for the route/date.");
+            return existing.Id;
+        }
+
         response.EnsureSuccessStatusCode();
 
         // Created record ID is returned in the OData-EntityId response header.
@@ -154,18 +184,34 @@ public class DataverseService : IDataverseService
 
         var filter = $"_mb_deliveryroute_value eq {routeId:D}" +
                      $" and mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z" +
-                     $" and mb_url ne null";
+                     $" and mb_url ne null and mb_url ne ''";
 
-        var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes?$filter={Uri.EscapeDataString(filter)}&$select=mb_url";
-        using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        var nextUrl = (string?)$"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes?$filter={Uri.EscapeDataString(filter)}&$select=mb_url";
+        var urls = new List<string>();
 
-        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-        return doc.RootElement.GetProperty("value")
-            .EnumerateArray()
-            .Select(e => e.GetProperty("mb_url").GetString()!)
-            .Where(u => !string.IsNullOrWhiteSpace(u))
-            .ToArray();
+        while (!string.IsNullOrWhiteSpace(nextUrl))
+        {
+            using var response = await SendAsync(HttpMethod.Get, nextUrl, body: null, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+
+            if (doc.RootElement.TryGetProperty("value", out var valueProp))
+            {
+                urls.AddRange(
+                    valueProp
+                        .EnumerateArray()
+                        .Select(e => e.GetProperty("mb_url").GetString())
+                        .Where(u => !string.IsNullOrWhiteSpace(u))!
+                        .Select(u => u!));
+            }
+
+            nextUrl = doc.RootElement.TryGetProperty("@odata.nextLink", out var nextLinkProp)
+                ? nextLinkProp.GetString()
+                : null;
+        }
+
+        return urls.ToArray();
     }
 
     public async Task<string?> GetDeliveryRouteNameAsync(Guid routeId, CancellationToken cancellationToken = default)
@@ -205,20 +251,6 @@ public class DataverseService : IDataverseService
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverypacks({packId:D})";
         using var response = await SendAsync(HttpMethod.Patch, url, body, cancellationToken);
         // Best-effort: do not throw if status update also fails.
-    }
-
-    private async Task<Guid[]> GetAccountIdsByRouteAsync(Guid routeId, CancellationToken cancellationToken)
-    {
-        var filter = $"_mb_deliveryroute_value eq {routeId:D}";
-        var url = $"{_dataverseUrl}/api/data/v9.2/accounts?$filter={Uri.EscapeDataString(filter)}&$select=accountid";
-        using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-        return doc.RootElement.GetProperty("value")
-            .EnumerateArray()
-            .Select(e => Guid.Parse(e.GetProperty("accountid").GetString()!))
-            .ToArray();
     }
 
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string url, object? body, CancellationToken cancellationToken)

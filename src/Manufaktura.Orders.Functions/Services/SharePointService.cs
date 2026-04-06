@@ -10,7 +10,8 @@ namespace Manufaktura.Orders.Functions.Services;
 public class SharePointService : ISharePointService
 {
     private static readonly string[] GraphScopes = ["https://graph.microsoft.com/.default"];
-    private const int SimpleUploadThresholdBytes = 4 * 1024 * 1024; // 4 MB
+    private const int SimpleUploadThresholdBytes = 4_000_000; // Conservative 4 MB threshold for Graph simple uploads
+    private const int UploadSessionChunkSize = 320 * 1024 * 10; // 3,276,800 bytes — must be a multiple of 320 KiB per Graph requirements
 
     private readonly HttpClient _httpClient;
     private readonly DefaultAzureCredential _credential;
@@ -86,8 +87,9 @@ public class SharePointService : ISharePointService
                 ?? throw new InvalidOperationException("Graph did not return an uploadUrl for the upload session.");
         }
 
-        // Step 2: Upload the content in chunks (4 MB each).
-        const int chunkSize = SimpleUploadThresholdBytes;
+        // Step 2: Upload the content in Graph-compliant chunks.
+        // Each non-final chunk must be a multiple of 320 KiB as required by Microsoft Graph.
+        const int chunkSize = UploadSessionChunkSize;
         var totalBytes = pdfContent.Length;
         var offset = 0;
 
