@@ -28,8 +28,11 @@ public class SharePointService : ISharePointService
         var itemPath = $"DeliveryPacks/{safeRouteName}/{fileName}";
 
         var (siteId, _) = DocumentMergeService.ParseSharePointUrl(_sharePointSiteUrl + "/Shared%20Documents/placeholder");
+        var normalizedSiteId = siteId.Contains(":/", StringComparison.Ordinal) && !siteId.EndsWith(":", StringComparison.Ordinal)
+            ? siteId + ":"
+            : siteId;
         var encodedPath = string.Join("/", itemPath.Split('/').Select(Uri.EscapeDataString));
-        var graphUrl = $"https://graph.microsoft.com/v1.0/sites/{siteId}/drive/root:/{encodedPath}:/content";
+        var graphUrl = $"https://graph.microsoft.com/v1.0/sites/{normalizedSiteId}/drive/root:/{encodedPath}:/content";
 
         var token = await _credential.GetTokenAsync(new TokenRequestContext(GraphScopes), cancellationToken);
 
