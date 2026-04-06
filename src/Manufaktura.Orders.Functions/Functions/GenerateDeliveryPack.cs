@@ -160,7 +160,13 @@ public class GenerateDeliveryPack
         }
         else
         {
-            packId = await _dataverse.CreateDeliveryPackAsync(note.RouteId, note.DeliveryDate, documentUrls.Length, cancellationToken);
+            var (newPackId, created) = await _dataverse.CreateDeliveryPackAsync(note.RouteId, note.DeliveryDate, documentUrls.Length, cancellationToken);
+            packId = newPackId;
+            if (!created)
+            {
+                _logger.LogInformation("Delivery pack {PackId} was created by a concurrent request. Skipping duplicate generation.", newPackId);
+                return new OkObjectResult(new { status = "skipped", reason = "already_generating", packId = newPackId });
+            }
             _logger.LogInformation("Created new delivery pack {PackId} for route {RouteId} on {Date}.", packId, note.RouteId, note.DeliveryDate.Date);
         }
 

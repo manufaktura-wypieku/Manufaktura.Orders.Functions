@@ -25,9 +25,10 @@ public interface IDataverseService
     Task<DeliveryPackRecord?> GetDeliveryPackAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Creates a new delivery pack record in Generating status and returns its ID.
+    /// Creates a new delivery pack record in Generating status.
+    /// Returns <c>created = false</c> when Dataverse returned 409 Conflict (concurrent creation).
     /// </summary>
-    Task<Guid> CreateDeliveryPackAsync(Guid routeId, DateTimeOffset deliveryDate, int notesCount, CancellationToken cancellationToken = default);
+    Task<(Guid packId, bool created)> CreateDeliveryPackAsync(Guid routeId, DateTimeOffset deliveryDate, int notesCount, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Sets an existing delivery pack to Generating status and updates the expected notes count.

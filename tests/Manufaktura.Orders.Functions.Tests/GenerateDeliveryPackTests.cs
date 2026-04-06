@@ -130,7 +130,7 @@ public class GenerateDeliveryPackTests
         SetupNote();
         SetupCounts(orderCount: 2, noteCount: 2);
         _dataverse.GetDeliveryPackAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>()).Returns((DeliveryPackRecord?)null);
-        _dataverse.CreateDeliveryPackAsync(RouteId, DeliveryDate, 2, Arg.Any<CancellationToken>()).Returns(PackId);
+        _dataverse.CreateDeliveryPackAsync(RouteId, DeliveryDate, 2, Arg.Any<CancellationToken>()).Returns((PackId, true));
         _dataverse.GetDeliveryNoteUrlsAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>())
             .Returns(["https://sp.example.com/sites/Dev/Shared%20Documents/note1.pdf",
                       "https://sp.example.com/sites/Dev/Shared%20Documents/note2.pdf"]);
@@ -180,7 +180,7 @@ public class GenerateDeliveryPackTests
         SetupNote();
         SetupCounts(orderCount: 1, noteCount: 1);
         _dataverse.GetDeliveryPackAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>()).Returns((DeliveryPackRecord?)null);
-        _dataverse.CreateDeliveryPackAsync(RouteId, DeliveryDate, 1, Arg.Any<CancellationToken>()).Returns(PackId);
+        _dataverse.CreateDeliveryPackAsync(RouteId, DeliveryDate, 1, Arg.Any<CancellationToken>()).Returns((PackId, true));
         _dataverse.GetDeliveryNoteUrlsAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>())
             .Returns(["https://sp.example.com/sites/Dev/Shared%20Documents/note1.pdf"]);
         _mergeService.MergeDocumentsAsync(Arg.Any<string[]>(), Arg.Any<CancellationToken>())

@@ -2,7 +2,6 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Azure.Core;
-using Azure.Identity;
 using Microsoft.Extensions.Configuration;
 
 namespace Manufaktura.Orders.Functions.Services;
@@ -14,10 +13,10 @@ public class SharePointService : ISharePointService
     private const int UploadSessionChunkSize = 320 * 1024 * 10; // 3,276,800 bytes — must be a multiple of 320 KiB per Graph requirements
 
     private readonly HttpClient _httpClient;
-    private readonly DefaultAzureCredential _credential;
+    private readonly TokenCredential _credential;
     private readonly string _sharePointSiteUrl;
 
-    public SharePointService(HttpClient httpClient, DefaultAzureCredential credential, IConfiguration configuration)
+    public SharePointService(HttpClient httpClient, TokenCredential credential, IConfiguration configuration)
     {
         _httpClient = httpClient;
         _credential = credential;

@@ -2,7 +2,6 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Azure.Core;
-using Azure.Identity;
 using Manufaktura.Orders.Functions.Models;
 using Microsoft.Extensions.Configuration;
 
@@ -11,11 +10,11 @@ namespace Manufaktura.Orders.Functions.Services;
 public class DataverseService : IDataverseService
 {
     private readonly HttpClient _httpClient;
-    private readonly DefaultAzureCredential _credential;
+    private readonly TokenCredential _credential;
     private readonly string _dataverseUrl;
     private readonly string[] _scopes;
 
-    public DataverseService(HttpClient httpClient, DefaultAzureCredential credential, IConfiguration configuration)
+    public DataverseService(HttpClient httpClient, TokenCredential credential, IConfiguration configuration)
     {
         _httpClient = httpClient;
         _credential = credential;
@@ -127,7 +126,7 @@ public class DataverseService : IDataverseService
         return new DeliveryPackRecord(packId, statusCode);
     }
 
-    public async Task<Guid> CreateDeliveryPackAsync(Guid routeId, DateTimeOffset deliveryDate, int notesCount, CancellationToken cancellationToken = default)
+    public async Task<(Guid packId, bool created)> CreateDeliveryPackAsync(Guid routeId, DateTimeOffset deliveryDate, int notesCount, CancellationToken cancellationToken = default)
     {
         // OData bind syntax for lookup fields uses a special key name that contains '@'.
         // Anonymous types cannot have such property names, so we use a dictionary.
@@ -150,7 +149,7 @@ public class DataverseService : IDataverseService
         {
             var existing = await GetDeliveryPackAsync(routeId, deliveryDate, cancellationToken)
                 ?? throw new InvalidOperationException("Dataverse returned 409 Conflict but no delivery pack was found for the route/date.");
-            return existing.Id;
+            return (existing.Id, false);
         }
 
         response.EnsureSuccessStatusCode();
@@ -164,7 +163,7 @@ public class DataverseService : IDataverseService
 
         // Header value is a URL like: https://org.crm.dynamics.com/api/data/v9.2/mb_deliverypacks(guid)
         var guidStr = entityIdHeader[(entityIdHeader.LastIndexOf('(') + 1)..entityIdHeader.LastIndexOf(')')];
-        return Guid.Parse(guidStr);
+        return (Guid.Parse(guidStr), true);
     }
 
     public async Task SetDeliveryPackGeneratingAsync(Guid packId, int notesCount, CancellationToken cancellationToken = default)
