@@ -49,9 +49,14 @@ public class SharePointService : ISharePointService
             ? siteId + ":"
             : siteId;
         var encodedPath = string.Join("/", itemPath.Split('/').Select(Uri.EscapeDataString));
-        var graphBaseUrl = $"https://graph.microsoft.com/v1.0/sites/{normalizedSiteId}/drive/root:/{encodedPath}:";
+        var siteGraphUrl = $"https://graph.microsoft.com/v1.0/sites/{normalizedSiteId}";
+        var graphBaseUrl = $"{siteGraphUrl}/drive/root:/{encodedPath}:";
 
         var token = await _credential.GetTokenAsync(new TokenRequestContext(GraphScopes), cancellationToken);
+
+        // Ensure the target folder hierarchy exists before uploading;
+        // Graph does not create intermediate folders automatically for upload sessions.
+        await EnsureFolderAsync(siteGraphUrl, $"DeliveryPacks/{safeRouteName}", token.Token, cancellationToken);
 
         if (pdfContent.Length <= SimpleUploadThresholdBytes)
         {
@@ -116,12 +121,74 @@ public class SharePointService : ISharePointService
             putRequest.Content.Headers.ContentRange = new ContentRangeHeaderValue(offset, offset + length - 1, totalBytes);
 
             using var putResponse = await _httpClient.SendAsync(putRequest, cancellationToken);
-            // 200/201 = upload complete; 202 = chunk accepted, more to follow.
-            if ((int)putResponse.StatusCode != 202)
-                putResponse.EnsureSuccessStatusCode();
 
-            offset += length;
+            if ((int)putResponse.StatusCode == 202)
+            {
+                // Parse nextExpectedRanges from the Graph response to get the confirmed next chunk offset.
+                offset = await GetNextExpectedOffsetAsync(putResponse, totalBytes, cancellationToken);
+                continue;
+            }
+
+            // 200/201 = upload complete.
+            putResponse.EnsureSuccessStatusCode();
+            break;
         }
+    }
+
+    private async Task EnsureFolderAsync(string siteGraphUrl, string folderPath, string bearerToken, CancellationToken cancellationToken)
+    {
+        // Walk each path segment and ensure the folder exists using conflictBehavior=replace (idempotent).
+        var segments = folderPath.Split('/');
+        var processedSegments = new List<string>();
+
+        foreach (var segment in segments)
+        {
+            var encodedParentPath = string.Join("/", processedSegments.Select(Uri.EscapeDataString));
+            var parentEndpoint = processedSegments.Count == 0
+                ? $"{siteGraphUrl}/drive/root/children"
+                : $"{siteGraphUrl}/drive/root:/{encodedParentPath}:/children";
+
+            processedSegments.Add(segment);
+
+            var body = JsonSerializer.Serialize(new Dictionary<string, object>
+            {
+                ["name"] = segment,
+                ["folder"] = new { },
+                ["@microsoft.graph.conflictBehavior"] = "replace"
+            });
+
+            using var request = new HttpRequestMessage(HttpMethod.Post, parentEndpoint);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+            request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+
+            using var response = await _httpClient.SendAsync(request, cancellationToken);
+            response.EnsureSuccessStatusCode();
+        }
+    }
+
+    private static async Task<int> GetNextExpectedOffsetAsync(HttpResponseMessage response, int totalBytes, CancellationToken cancellationToken)
+    {
+        using var contentStream = await response.Content.ReadAsStreamAsync(cancellationToken);
+        using var doc = await JsonDocument.ParseAsync(contentStream, cancellationToken: cancellationToken);
+
+        if (!doc.RootElement.TryGetProperty("nextExpectedRanges", out var nextExpectedRanges)
+            || nextExpectedRanges.ValueKind != JsonValueKind.Array
+            || nextExpectedRanges.GetArrayLength() == 0)
+        {
+            throw new InvalidOperationException("Graph returned 202 Accepted without nextExpectedRanges.");
+        }
+
+        var nextRange = nextExpectedRanges[0].GetString();
+        if (string.IsNullOrWhiteSpace(nextRange))
+            throw new InvalidOperationException("Graph returned an empty nextExpectedRanges entry.");
+
+        var separatorIndex = nextRange.IndexOf('-');
+        var startText = separatorIndex >= 0 ? nextRange[..separatorIndex] : nextRange;
+
+        if (!int.TryParse(startText, out var nextOffset) || nextOffset < 0 || nextOffset > totalBytes)
+            throw new InvalidOperationException($"Graph returned an invalid next expected range start: '{nextRange}'.");
+
+        return nextOffset;
     }
 
     private static string SanitizePathSegment(string name)

@@ -64,6 +64,14 @@ public class GenerateDeliveryPack
         {
             return await RunOrchestrationAsync(request.DeliveryNoteId, cancellationToken);
         }
+        catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            _logger.LogError(ex, "Upstream auth failure in GenerateDeliveryPack for note {NoteId}", request.DeliveryNoteId);
+            return new ObjectResult(new { error = "Upstream service access denied.", code = "upstream_auth_failure" })
+            {
+                StatusCode = StatusCodes.Status502BadGateway
+            };
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unhandled error in GenerateDeliveryPack for note {NoteId}", request.DeliveryNoteId);
