@@ -208,9 +208,8 @@ public class DataverseService : IDataverseService
         };
 
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverypacks({packId:D})";
-        var response = await SendAsync(HttpMethod.Patch, url, body, cancellationToken);
+        using var response = await SendAsync(HttpMethod.Patch, url, body, cancellationToken);
         // Best-effort: do not throw if status update also fails.
-        _ = response.IsSuccessStatusCode;
     }
 
     private async Task<Guid[]> GetAccountIdsByRouteAsync(Guid routeId, CancellationToken cancellationToken)
