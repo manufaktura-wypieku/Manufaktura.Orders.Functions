@@ -103,16 +103,16 @@ public class GenerateDeliveryPack
         var orderCount = await _dataverse.CountCompletedOrdersByRouteAndDateAsync(note.RouteId, note.DeliveryDate, cancellationToken);
         _logger.LogInformation("Completed orders for route {RouteId} on {Date}: {Count}", note.RouteId, note.DeliveryDate.Date, orderCount);
 
-        // Step 3: Count delivery notes with a SharePoint URL for the route/date.
-        var noteCount = await _dataverse.CountDeliveryNotesWithUrlAsync(note.RouteId, note.DeliveryDate, cancellationToken);
-        _logger.LogInformation("Delivery notes with URL for route {RouteId} on {Date}: {Count}", note.RouteId, note.DeliveryDate.Date, noteCount);
-
-        // Step 4: Exit if there are no completed orders for this route/date.
+        // Step 3: Exit early if there are no completed orders — avoids unnecessary Dataverse calls.
         if (orderCount == 0)
         {
             _logger.LogInformation("No completed orders for route {RouteId} on {Date}. Exiting.", note.RouteId, note.DeliveryDate.Date);
             return new OkObjectResult(new { status = "skipped", reason = "no_orders", orderCount });
         }
+
+        // Step 4: Count delivery notes with a SharePoint URL for the route/date.
+        var noteCount = await _dataverse.CountDeliveryNotesWithUrlAsync(note.RouteId, note.DeliveryDate, cancellationToken);
+        _logger.LogInformation("Delivery notes with URL for route {RouteId} on {Date}: {Count}", note.RouteId, note.DeliveryDate.Date, noteCount);
 
         // Step 5: Exit if not all delivery notes are ready.
         if (noteCount < orderCount)
@@ -164,8 +164,9 @@ public class GenerateDeliveryPack
             _logger.LogInformation("Merge complete: {Size} bytes for pack {PackId}.", pdfBytes.Length, packId);
 
             // Step 10: Upload merged PDF to SharePoint /DeliveryPacks/{RouteName}/
-            var routeName = await _dataverse.GetDeliveryRouteNameAsync(note.RouteId, cancellationToken)
-                            ?? note.RouteId.ToString("D");
+            var routeName = await _dataverse.GetDeliveryRouteNameAsync(note.RouteId, cancellationToken);
+            if (string.IsNullOrWhiteSpace(routeName))
+                routeName = note.RouteId.ToString("D");
             var sharePointUrl = await _sharePoint.UploadDeliveryPackAsync(routeName, note.DeliveryDate, pdfBytes, cancellationToken);
             _logger.LogInformation("Uploaded delivery pack PDF to {Url} for pack {PackId}.", sharePointUrl, packId);
 

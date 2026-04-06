@@ -72,6 +72,7 @@ public class GenerateDeliveryPackTests
         var ok = Assert.IsType<OkObjectResult>(result);
         AssertStatus(ok.Value, "skipped");
         AssertCode(ok.Value, "no_orders");
+        await _dataverse.DidNotReceive().CountDeliveryNotesWithUrlAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
         await _dataverse.DidNotReceive().GetDeliveryPackAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
     }
 

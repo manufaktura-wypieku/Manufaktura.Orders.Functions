@@ -253,7 +253,20 @@ public class DataverseService : IDataverseService
 
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverypacks({packId:D})";
         using var response = await SendAsync(HttpMethod.Patch, url, body, cancellationToken);
-        // Best-effort: do not throw if status update also fails.
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var responseContent = response.Content is null
+                ? string.Empty
+                : await response.Content.ReadAsStringAsync(cancellationToken);
+
+            throw new HttpRequestException(
+                $"Failed to update delivery pack '{packId:D}' to Failed. " +
+                $"Dataverse returned {(int)response.StatusCode} ({response.ReasonPhrase}). " +
+                $"Response: {responseContent}",
+                null,
+                response.StatusCode);
+        }
     }
 
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string url, object? body, CancellationToken cancellationToken)

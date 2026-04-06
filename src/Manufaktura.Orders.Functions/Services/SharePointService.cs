@@ -24,8 +24,8 @@ public class SharePointService : ISharePointService
         _sharePointSiteUrl = configuration["SharePointSiteUrl"]
             ?? throw new InvalidOperationException("SharePointSiteUrl configuration is required.");
 
-        // Validate at startup so a misconfigured URL fails fast with a clear message
-        // rather than throwing ArgumentException mid-request.
+        // Validate when this service is constructed so a misconfigured URL fails
+        // with a clear message rather than throwing ArgumentException later during upload processing.
         try
         {
             DocumentMergeService.ParseSharePointUrl(_sharePointSiteUrl + "/Shared%20Documents/placeholder");
