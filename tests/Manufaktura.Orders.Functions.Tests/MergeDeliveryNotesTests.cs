@@ -26,7 +26,7 @@ public class MergeDeliveryNotesTests
     [Fact]
     public async Task ReturnsPdfWhenDocumentsProvided()
     {
-        var urls = new[] { "https://example.sharepoint.com/sites/Site/Shared%20Documents/doc1.docx" };
+        var urls = new[] { "https://example.sharepoint.com/sites/Site/Shared%20Documents/doc1.pdf" };
         var expectedPdf = new byte[] { 0x25, 0x50, 0x44, 0x46 }; // %PDF header
 
         _mergeService.MergeDocumentsAsync(Arg.Any<string[]>(), Arg.Any<CancellationToken>())
@@ -58,7 +58,7 @@ public class MergeDeliveryNotesTests
     [Fact]
     public async Task ReturnsBadRequestWhenTooManyUrls()
     {
-        var urls = Enumerable.Range(1, 51).Select(i => $"https://example.sharepoint.com/sites/Site/Shared%20Documents/doc{i}.docx").ToArray();
+        var urls = Enumerable.Range(1, 51).Select(i => $"https://example.sharepoint.com/sites/Site/Shared%20Documents/doc{i}.pdf").ToArray();
         var request = CreateHttpRequest(new { documentUrls = urls });
         var result = await _function.Run(request, CancellationToken.None);
 
@@ -132,7 +132,7 @@ public class MergeDeliveryNotesTests
     [Fact]
     public async Task ReturnsBadGatewayWhenMergeServiceThrowsHttpRequestException()
     {
-        var urls = new[] { "https://example.sharepoint.com/sites/Site/Shared%20Documents/doc1.docx" };
+        var urls = new[] { "https://example.sharepoint.com/sites/Site/Shared%20Documents/doc1.pdf" };
 
         _mergeService.MergeDocumentsAsync(Arg.Any<string[]>(), Arg.Any<CancellationToken>())
             .Throws(new System.Net.Http.HttpRequestException("Graph API unreachable."));

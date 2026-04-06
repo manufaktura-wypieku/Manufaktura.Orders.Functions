@@ -10,5 +10,7 @@ builder.ConfigureFunctionsWebApplication();
 
 builder.Services.AddSingleton<DefaultAzureCredential>();
 builder.Services.AddHttpClient<IDocumentMergeService, DocumentMergeService>();
+builder.Services.AddHttpClient<IDataverseService, DataverseService>();
+builder.Services.AddHttpClient<ISharePointService, SharePointService>();
 
 builder.Build().Run();
