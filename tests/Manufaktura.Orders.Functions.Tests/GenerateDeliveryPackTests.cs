@@ -156,7 +156,8 @@ public class GenerateDeliveryPackTests
         _dataverse.GetDeliveryPackAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>())
             .Returns(new DeliveryPackRecord(PackId, DeliveryPackStatus.Complete)); // Re-trigger for regeneration
         _dataverse.GetDeliveryNoteUrlsAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>())
-            .Returns(["https://sp.example.com/sites/Dev/Shared%20Documents/note1.pdf"]);
+            .Returns(["https://sp.example.com/sites/Dev/Shared%20Documents/note1.pdf",
+                      "https://sp.example.com/sites/Dev/Shared%20Documents/note2.pdf"]);
         _mergeService.MergeDocumentsAsync(Arg.Any<string[]>(), Arg.Any<CancellationToken>()).Returns([0x25, 0x50, 0x44, 0x46]);
         _dataverse.GetDeliveryRouteNameAsync(RouteId, Arg.Any<CancellationToken>()).Returns("Route-A");
         _sharePoint.UploadDeliveryPackAsync(Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<byte[]>(), Arg.Any<CancellationToken>())
