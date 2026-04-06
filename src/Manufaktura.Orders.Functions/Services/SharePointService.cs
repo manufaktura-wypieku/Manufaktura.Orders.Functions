@@ -68,7 +68,7 @@ public class SharePointService : ISharePointService
 
         // Return the SharePoint URL of the uploaded file.
         var siteBase = new Uri(_sharePointSiteUrl).GetLeftPart(UriPartial.Authority);
-        var sitePath = new Uri(_sharePointSiteUrl).AbsolutePath;
+        var sitePath = new Uri(_sharePointSiteUrl).AbsolutePath.TrimEnd('/');
         return $"{siteBase}{sitePath}/Shared%20Documents/{Uri.EscapeDataString("DeliveryPacks")}/{Uri.EscapeDataString(safeRouteName)}/{Uri.EscapeDataString(fileName)}";
     }
 
@@ -153,7 +153,7 @@ public class SharePointService : ISharePointService
             {
                 ["name"] = segment,
                 ["folder"] = new { },
-                ["@microsoft.graph.conflictBehavior"] = "replace"
+                ["@microsoft.graph.conflictBehavior"] = "fail"
             });
 
             using var request = new HttpRequestMessage(HttpMethod.Post, parentEndpoint);
@@ -161,7 +161,9 @@ public class SharePointService : ISharePointService
             request.Content = new StringContent(body, Encoding.UTF8, "application/json");
 
             using var response = await _httpClient.SendAsync(request, cancellationToken);
-            response.EnsureSuccessStatusCode();
+            // 409 Conflict means the folder already exists — treat as success.
+            if (response.StatusCode != System.Net.HttpStatusCode.Conflict)
+                response.EnsureSuccessStatusCode();
         }
     }
 

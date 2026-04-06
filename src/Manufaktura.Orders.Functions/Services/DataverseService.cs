@@ -18,9 +18,10 @@ public class DataverseService : IDataverseService
     {
         _httpClient = httpClient;
         _credential = credential;
-        _dataverseUrl = configuration["DataverseUrl"]
-            ?? throw new InvalidOperationException("DataverseUrl configuration is required.");
-        _scopes = [_dataverseUrl.TrimEnd('/') + "/.default"];
+        _dataverseUrl = (configuration["DataverseUrl"]
+            ?? throw new InvalidOperationException("DataverseUrl configuration is required."))
+            .TrimEnd('/');
+        _scopes = [_dataverseUrl + "/.default"];
     }
 
     public async Task<DeliveryNoteRecord> GetDeliveryNoteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -86,8 +87,8 @@ public class DataverseService : IDataverseService
 
     public async Task<int> CountDeliveryNotesWithUrlAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default)
     {
-        var dateFrom = deliveryDate.Date.ToString("yyyy-MM-dd");
-        var dateTo = deliveryDate.Date.AddDays(1).ToString("yyyy-MM-dd");
+        var dateFrom = deliveryDate.UtcDateTime.Date.ToString("yyyy-MM-dd");
+        var dateTo = deliveryDate.UtcDateTime.Date.AddDays(1).ToString("yyyy-MM-dd");
 
         var filter = $"_mb_deliveryroute_value eq {routeId:D}" +
                      $" and mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z" +
@@ -103,8 +104,8 @@ public class DataverseService : IDataverseService
 
     public async Task<DeliveryPackRecord?> GetDeliveryPackAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default)
     {
-        var dateFrom = deliveryDate.Date.ToString("yyyy-MM-dd");
-        var dateTo = deliveryDate.Date.AddDays(1).ToString("yyyy-MM-dd");
+        var dateFrom = deliveryDate.UtcDateTime.Date.ToString("yyyy-MM-dd");
+        var dateTo = deliveryDate.UtcDateTime.Date.AddDays(1).ToString("yyyy-MM-dd");
 
         var filter = $"_mb_deliveryroute_value eq {routeId:D}" +
                      $" and mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z";
@@ -181,8 +182,8 @@ public class DataverseService : IDataverseService
 
     public async Task<string[]> GetDeliveryNoteUrlsAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default)
     {
-        var dateFrom = deliveryDate.Date.ToString("yyyy-MM-dd");
-        var dateTo = deliveryDate.Date.AddDays(1).ToString("yyyy-MM-dd");
+        var dateFrom = deliveryDate.UtcDateTime.Date.ToString("yyyy-MM-dd");
+        var dateTo = deliveryDate.UtcDateTime.Date.AddDays(1).ToString("yyyy-MM-dd");
 
         var filter = $"_mb_deliveryroute_value eq {routeId:D}" +
                      $" and mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z" +

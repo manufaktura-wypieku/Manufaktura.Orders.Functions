@@ -72,6 +72,14 @@ public class GenerateDeliveryPack
                 StatusCode = StatusCodes.Status502BadGateway
             };
         }
+        catch (HttpRequestException ex)
+        {
+            _logger.LogError(ex, "Upstream service error in GenerateDeliveryPack for note {NoteId}", request.DeliveryNoteId);
+            return new ObjectResult(new { error = "An upstream service returned an error.", code = "upstream_error" })
+            {
+                StatusCode = StatusCodes.Status502BadGateway
+            };
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Unhandled error in GenerateDeliveryPack for note {NoteId}", request.DeliveryNoteId);

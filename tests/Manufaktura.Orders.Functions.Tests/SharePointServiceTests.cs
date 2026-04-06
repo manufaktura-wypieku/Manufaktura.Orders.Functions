@@ -43,7 +43,7 @@ public class SharePointServiceTests
         Assert.Equal(HttpMethod.Post, req0.Method);
         Assert.Equal($"{SiteGraphUrlBase}/drive/root/children", req0.Url);
         Assert.Contains("\"DeliveryPacks\"", req0.Body);
-        Assert.Contains("\"replace\"", req0.Body);
+        Assert.Contains("\"fail\"", req0.Body);
 
         // Folder create 2: root:/DeliveryPacks:/children for route sub-folder
         var req1 = handler.SentRequests[1];
