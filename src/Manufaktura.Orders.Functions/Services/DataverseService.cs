@@ -128,7 +128,10 @@ public class DataverseService : IDataverseService
         response.EnsureSuccessStatusCode();
 
         // Created record ID is returned in the OData-EntityId response header.
-        var entityIdHeader = response.Headers.GetValues("OData-EntityId").FirstOrDefault()
+        if (!response.Headers.TryGetValues("OData-EntityId", out var entityIdHeaderValues))
+            throw new InvalidOperationException("Dataverse did not return OData-EntityId after create.");
+
+        var entityIdHeader = entityIdHeaderValues.FirstOrDefault()
             ?? throw new InvalidOperationException("Dataverse did not return OData-EntityId after create.");
 
         // Header value is a URL like: https://org.crm.dynamics.com/api/data/v9.2/mb_deliverypacks(guid)
