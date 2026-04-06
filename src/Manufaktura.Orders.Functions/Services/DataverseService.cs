@@ -10,11 +10,6 @@ namespace Manufaktura.Orders.Functions.Services;
 
 public class DataverseService : IDataverseService
 {
-    // Status codes for mb_deliverypack mb_statusreason field
-    internal const int StatusGenerating = 124530001;
-    internal const int StatusComplete = 124530002;
-    internal const int StatusFailed = 124530003;
-
     private readonly HttpClient _httpClient;
     private readonly DefaultAzureCredential _credential;
     private readonly string _dataverseUrl;
@@ -118,7 +113,7 @@ public class DataverseService : IDataverseService
         var body = new Dictionary<string, object?>
         {
             ["mb_deliverydate"] = deliveryDate.UtcDateTime,
-            ["mb_statusreason"] = StatusGenerating,
+            ["mb_statusreason"] = DeliveryPackStatus.Generating,
             ["mb_notescount"] = notesCount,
             ["mb_deliveryroute@odata.bind"] = $"/mb_deliveryroutes({routeId:D})"
         };
@@ -143,7 +138,7 @@ public class DataverseService : IDataverseService
     {
         var body = new Dictionary<string, object?>
         {
-            ["mb_statusreason"] = StatusGenerating,
+            ["mb_statusreason"] = DeliveryPackStatus.Generating,
             ["mb_notescount"] = notesCount
         };
 
@@ -188,7 +183,7 @@ public class DataverseService : IDataverseService
     {
         var body = new Dictionary<string, object?>
         {
-            ["mb_statusreason"] = StatusComplete,
+            ["mb_statusreason"] = DeliveryPackStatus.Complete,
             ["mb_url"] = url,
             ["mb_mergedcount"] = mergedCount,
             ["mb_generatedon"] = generatedOn.UtcDateTime
@@ -203,7 +198,7 @@ public class DataverseService : IDataverseService
     {
         var body = new Dictionary<string, object?>
         {
-            ["mb_statusreason"] = StatusFailed,
+            ["mb_statusreason"] = DeliveryPackStatus.Failed,
             ["mb_log"] = log
         };
 

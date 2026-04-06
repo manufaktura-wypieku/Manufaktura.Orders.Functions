@@ -81,7 +81,7 @@ public class GenerateDeliveryPackTests
         SetupNote();
         SetupCounts(orderCount: 2, noteCount: 2);
         _dataverse.GetDeliveryPackAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>())
-            .Returns(new DeliveryPackRecord(PackId, DataverseService.StatusGenerating));
+            .Returns(new DeliveryPackRecord(PackId, DeliveryPackStatus.Generating));
 
         var request = CreateHttpRequest(new { deliveryNoteId = NoteId });
         var result = await _function.Run(request, CancellationToken.None);
@@ -122,7 +122,7 @@ public class GenerateDeliveryPackTests
         SetupNote();
         SetupCounts(orderCount: 2, noteCount: 2);
         _dataverse.GetDeliveryPackAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>())
-            .Returns(new DeliveryPackRecord(PackId, DataverseService.StatusComplete)); // Re-trigger for regeneration
+            .Returns(new DeliveryPackRecord(PackId, DeliveryPackStatus.Complete)); // Re-trigger for regeneration
         _dataverse.GetDeliveryNoteUrlsAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>())
             .Returns(["https://sp.example.com/sites/Dev/Shared%20Documents/note1.pdf"]);
         _mergeService.MergeDocumentsAsync(Arg.Any<string[]>(), Arg.Any<CancellationToken>()).Returns([0x25, 0x50, 0x44, 0x46]);

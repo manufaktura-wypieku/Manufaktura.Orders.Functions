@@ -93,7 +93,7 @@ public class GenerateDeliveryPack
         if (existingPack is not null)
         {
             // Step 6: Concurrency guard — exit if already generating.
-            if (existingPack.StatusCode == DataverseService.StatusGenerating)
+            if (existingPack.StatusCode == DeliveryPackStatus.Generating)
             {
                 _logger.LogInformation("Delivery pack {PackId} is already Generating. Exiting.", existingPack.Id);
                 return new OkObjectResult(new { status = "skipped", reason = "already_generating", packId = existingPack.Id });
