@@ -32,7 +32,7 @@ public class DataverseService : IDataverseService
     public async Task<DeliveryNoteRecord> GetDeliveryNoteAsync(Guid id, CancellationToken cancellationToken = default)
     {
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes({id:D})?$select=mb_deliverydate,_mb_deliveryroute_value";
-        var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
+        using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
@@ -62,7 +62,7 @@ public class DataverseService : IDataverseService
                      $" and ({accountFilter})";
 
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_orders?$filter={Uri.EscapeDataString(filter)}&$count=true&$select=mb_orderid&$top=1";
-        var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
+        using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
@@ -79,7 +79,7 @@ public class DataverseService : IDataverseService
                      $" and mb_url ne null";
 
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes?$filter={Uri.EscapeDataString(filter)}&$count=true&$select=mb_deliverynoteid&$top=1";
-        var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
+        using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
@@ -95,7 +95,7 @@ public class DataverseService : IDataverseService
                      $" and mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z";
 
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverypacks?$filter={Uri.EscapeDataString(filter)}&$select=mb_deliverypackid,mb_statusreason&$top=1";
-        var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
+        using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
@@ -124,7 +124,7 @@ public class DataverseService : IDataverseService
         };
 
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverypacks";
-        var response = await SendAsync(HttpMethod.Post, url, body, cancellationToken);
+        using var response = await SendAsync(HttpMethod.Post, url, body, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         // Created record ID is returned in the OData-EntityId response header.
@@ -148,7 +148,7 @@ public class DataverseService : IDataverseService
         };
 
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverypacks({packId:D})";
-        var response = await SendAsync(HttpMethod.Patch, url, body, cancellationToken);
+        using var response = await SendAsync(HttpMethod.Patch, url, body, cancellationToken);
         response.EnsureSuccessStatusCode();
     }
 
@@ -162,7 +162,7 @@ public class DataverseService : IDataverseService
                      $" and mb_url ne null";
 
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes?$filter={Uri.EscapeDataString(filter)}&$select=mb_url";
-        var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
+        using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
@@ -176,7 +176,7 @@ public class DataverseService : IDataverseService
     public async Task<string?> GetDeliveryRouteNameAsync(Guid routeId, CancellationToken cancellationToken = default)
     {
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliveryroutes({routeId:D})?$select=mb_name";
-        var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
+        using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
         if (!response.IsSuccessStatusCode)
             return null;
 
@@ -195,7 +195,7 @@ public class DataverseService : IDataverseService
         };
 
         var requestUrl = $"{_dataverseUrl}/api/data/v9.2/mb_deliverypacks({packId:D})";
-        var response = await SendAsync(HttpMethod.Patch, requestUrl, body, cancellationToken);
+        using var response = await SendAsync(HttpMethod.Patch, requestUrl, body, cancellationToken);
         response.EnsureSuccessStatusCode();
     }
 
@@ -216,7 +216,7 @@ public class DataverseService : IDataverseService
     {
         var filter = $"_mb_deliveryroute_value eq {routeId:D}";
         var url = $"{_dataverseUrl}/api/data/v9.2/accounts?$filter={Uri.EscapeDataString(filter)}&$select=accountid";
-        var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
+        using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
