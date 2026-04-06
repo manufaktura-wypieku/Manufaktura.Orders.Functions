@@ -143,6 +143,9 @@ public class DataverseService : IDataverseService
         using var response = await SendAsync(HttpMethod.Post, url, body, cancellationToken);
 
         // 409 Conflict: a concurrent request already created the pack; re-query and return its ID.
+        // NOTE: this guard only prevents duplicates when Dataverse enforces a uniqueness alternate key
+        // for (mb_deliveryroute, mb_deliverydate). Ensure that alternate key is configured in the
+        // solution before deploying to production.
         if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
         {
             var existing = await GetDeliveryPackAsync(routeId, deliveryDate, cancellationToken)

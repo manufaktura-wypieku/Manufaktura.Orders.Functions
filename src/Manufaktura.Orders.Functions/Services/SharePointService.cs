@@ -23,6 +23,19 @@ public class SharePointService : ISharePointService
         _credential = credential;
         _sharePointSiteUrl = configuration["SharePointSiteUrl"]
             ?? throw new InvalidOperationException("SharePointSiteUrl configuration is required.");
+
+        // Validate at startup so a misconfigured URL fails fast with a clear message
+        // rather than throwing ArgumentException mid-request.
+        try
+        {
+            DocumentMergeService.ParseSharePointUrl(_sharePointSiteUrl + "/Shared%20Documents/placeholder");
+        }
+        catch (Exception ex)
+        {
+            throw new InvalidOperationException(
+                $"SharePointSiteUrl '{_sharePointSiteUrl}' is not a valid SharePoint site URL. " +
+                "Expected format: https://tenant.sharepoint.com/sites/name", ex);
+        }
     }
 
     public async Task<string> UploadDeliveryPackAsync(string routeName, DateTimeOffset deliveryDate, byte[] pdfContent, CancellationToken cancellationToken = default)

@@ -4,6 +4,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.Azure.Functions.Worker;
 using Microsoft.Extensions.Logging;
+using System.Net;
 using System.Text.Json;
 
 namespace Manufaktura.Orders.Functions.Functions;
@@ -42,6 +43,16 @@ public class GenerateDeliveryPack
             _logger.LogWarning(ex, "Failed to deserialize GenerateDeliveryPack request body");
             return new BadRequestObjectResult(new { error = "Request body contains invalid JSON.", code = "invalid_json" });
         }
+        catch (InvalidOperationException ex)
+        {
+            // ReadFromJsonAsync throws InvalidOperationException when the Content-Type is missing
+            // or is not a supported JSON media type.
+            _logger.LogWarning(ex, "GenerateDeliveryPack request has unsupported or missing Content-Type");
+            return new ObjectResult(new { error = "Request Content-Type must be application/json.", code = "unsupported_media_type" })
+            {
+                StatusCode = StatusCodes.Status415UnsupportedMediaType
+            };
+        }
 
         if (request is null || request.DeliveryNoteId == Guid.Empty)
         {
@@ -67,7 +78,24 @@ public class GenerateDeliveryPack
     {
         // Step 1: Read delivery note to get route and delivery date.
         _logger.LogInformation("Reading delivery note {NoteId}", noteId);
-        var note = await _dataverse.GetDeliveryNoteAsync(noteId, cancellationToken);
+        DeliveryNoteRecord note;
+        try
+        {
+            note = await _dataverse.GetDeliveryNoteAsync(noteId, cancellationToken);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning("Delivery note {NoteId} not found in Dataverse", noteId);
+            return new NotFoundObjectResult(new { error = "Delivery note not found.", code = "delivery_note_not_found" });
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode is HttpStatusCode.Unauthorized or HttpStatusCode.Forbidden)
+        {
+            _logger.LogError(ex, "Unauthorized access to Dataverse for delivery note {NoteId}", noteId);
+            return new ObjectResult(new { error = "Upstream service access denied.", code = "upstream_auth_failure" })
+            {
+                StatusCode = StatusCodes.Status502BadGateway
+            };
+        }
 
         _logger.LogInformation("Delivery note {NoteId}: route={RouteId}, date={Date}", noteId, note.RouteId, note.DeliveryDate.Date);
 
