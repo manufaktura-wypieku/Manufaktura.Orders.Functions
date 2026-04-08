@@ -43,8 +43,9 @@ public class DataverseService : IDataverseService
     {
         // Use FetchXML with a link-entity join to filter orders by the account's delivery route,
         // avoiding URL-length issues from expanding all account IDs into an OData OR filter.
-        var dateFrom = deliveryDate.Date.ToString("yyyy-MM-dd");
-        var dateTo = deliveryDate.Date.AddDays(1).ToString("yyyy-MM-dd");
+        var utcDeliveryDate = deliveryDate.UtcDateTime.Date;
+        var dateFrom = utcDeliveryDate.ToString("yyyy-MM-dd");
+        var dateTo = utcDeliveryDate.AddDays(1).ToString("yyyy-MM-dd");
 
         var fetchXml =
             $"""
