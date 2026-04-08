@@ -32,8 +32,8 @@ Azure Functions service for the Manufaktura Orders system. Provides HTTP-trigger
 
 ## Functions
 
-| Function | Trigger | Description |
-|---|---|---|
+| Function             | Trigger   | Description                                                                                                                          |
+| -------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
 | `MergeDeliveryNotes` | HTTP POST | Accepts an array of SharePoint document URLs, downloads them as PDF via Graph API, merges into a single PDF, and returns the result. |
 
 ## Local Development
