@@ -60,11 +60,22 @@ dotnet test
 
 ### First-time setup
 
-Run the OIDC setup script to create the App Registration, federated credentials, and GitHub secrets:
+Run the OIDC setup script to create the App Registration, federated credentials, GitHub secrets, and Dataverse application users (with System Administrator role) in all three environments:
 
 ```powershell
 .\infra\setup-github-oidc.ps1
 ```
+
+The Dataverse environment URLs default to the Manufaktura dev/test/prod organisations. Override them if needed:
+
+```powershell
+.\infra\setup-github-oidc.ps1 `
+    -DataverseDevUrl  'https://manufaktura-develop.crm11.dynamics.com' `
+    -DataverseTestUrl 'https://manufaktura-test.crm11.dynamics.com' `
+    -DataverseProdUrl 'https://manufaktura.crm11.dynamics.com'
+```
+
+To skip Dataverse setup entirely, pass empty strings for all three URL parameters.
 
 ### CI/CD
 

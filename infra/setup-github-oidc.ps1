@@ -11,7 +11,17 @@
     - GitHub CLI installed and logged in (gh auth login)
 
 .EXAMPLE
+    # Without Dataverse
     .\infra\setup-github-oidc.ps1 -TenantId '9096fb11-ab2c-4e04-b90c-dc3ce88d59fb' -GitHubOrg 'manufaktura-wypieku' -GitHubRepo 'Manufaktura.Orders.Functions'
+
+    # With Dataverse application users
+    .\infra\setup-github-oidc.ps1 `
+        -TenantId '9096fb11-ab2c-4e04-b90c-dc3ce88d59fb' `
+        -GitHubOrg 'manufaktura-wypieku' `
+        -GitHubRepo 'Manufaktura.Orders.Functions' `
+        -DataverseDevUrl  'https://manufaktura-develop.crm11.dynamics.com' `
+        -DataverseTestUrl 'https://manufaktura-test.crm11.dynamics.com' `
+        -DataverseProdUrl 'https://manufaktura.crm11.dynamics.com'
 #>
 
 param(
@@ -22,7 +32,19 @@ param(
     [string]$GitHubOrg = 'manufaktura-wypieku',
 
     [Parameter()]
-    [string]$GitHubRepo = 'Manufaktura.Orders.Functions'
+    [string]$GitHubRepo = 'Manufaktura.Orders.Functions',
+
+    # Optional: Dataverse environment URLs for creating application users.
+    # When provided, the script will create an application user for the App Registration
+    # in each Dataverse environment and assign the System Administrator security role.
+    [Parameter()]
+    [string]$DataverseDevUrl = 'https://manufaktura-develop.crm11.dynamics.com',
+
+    [Parameter()]
+    [string]$DataverseTestUrl = 'https://manufaktura-test.crm11.dynamics.com',
+
+    [Parameter()]
+    [string]$DataverseProdUrl = 'https://manufaktura.crm11.dynamics.com'
 )
 
 $ErrorActionPreference = 'Stop'
@@ -140,6 +162,93 @@ gh api --method PUT "repos/${GitHubOrg}/${GitHubRepo}/environments/dev" --silent
 gh api --method PUT "repos/${GitHubOrg}/${GitHubRepo}/environments/test" --silent
 gh api --method PUT "repos/${GitHubOrg}/${GitHubRepo}/environments/production" --silent
 Write-Host '    Created: dev, test, production'
+
+# Create Dataverse application users (only when URLs are supplied)
+$DataverseEnvs = @(
+    @{ Name = 'dev'; Url = $DataverseDevUrl }
+    @{ Name = 'test'; Url = $DataverseTestUrl }
+    @{ Name = 'prod'; Url = $DataverseProdUrl }
+) | Where-Object { $_.Url }
+
+if ($DataverseEnvs) {
+    Write-Host ''
+    Write-Host '==> Creating Dataverse application users...'
+
+    foreach ($Env in $DataverseEnvs) {
+        $OrgUrl = $Env.Url.TrimEnd('/')
+        Write-Host ''
+        Write-Host "    Environment ($($Env.Name)): $OrgUrl"
+
+        # Obtain an access token for this Dataverse org using the current az login
+        $Token = (az account get-access-token --resource $OrgUrl | ConvertFrom-Json).accessToken
+
+        $Headers = @{
+            Authorization      = "Bearer $Token"
+            'Content-Type'     = 'application/json; charset=utf-8'
+            Accept             = 'application/json'
+            'OData-MaxVersion' = '4.0'
+            'OData-Version'    = '4.0'
+        }
+
+        # Check whether the application user already exists
+        $ExistingUser = (Invoke-RestMethod `
+                -Uri "$OrgUrl/api/data/v9.2/systemusers?`$filter=applicationid eq $AppId&`$select=systemuserid" `
+                -Headers $Headers).value
+
+        if ($ExistingUser.Count -gt 0) {
+            $UserId = $ExistingUser[0].systemuserid
+            Write-Host "    Application user already exists (skipped). User ID: $UserId"
+        }
+        else {
+            # Bind to the root business unit
+            $RootBu = (Invoke-RestMethod `
+                    -Uri "$OrgUrl/api/data/v9.2/businessunits?`$filter=_parentbusinessunitid_value eq null&`$select=businessunitid" `
+                    -Headers $Headers).value[0].businessunitid
+
+            $Body = @{
+                applicationid               = $AppId
+                'businessunitid@odata.bind' = "/businessunits($RootBu)"
+            } | ConvertTo-Json
+
+            # POST and retrieve the new record via a follow-up GET
+            $CreateHeaders = $Headers.Clone()
+            $CreateHeaders['Prefer'] = 'return=representation'
+            $NewUser = Invoke-RestMethod `
+                -Uri "$OrgUrl/api/data/v9.2/systemusers" `
+                -Method Post -Headers $CreateHeaders -Body $Body
+            $UserId = $NewUser.systemuserid
+            Write-Host "    Created application user. User ID: $UserId"
+        }
+
+        # Resolve the root-level System Administrator role
+        $SysAdminRole = (Invoke-RestMethod `
+                -Uri "$OrgUrl/api/data/v9.2/roles?`$filter=name eq 'System Administrator' and _parentroleid_value eq null&`$select=roleid" `
+                -Headers $Headers).value
+        if (-not $SysAdminRole) {
+            Write-Warning "    Could not find 'System Administrator' role in $OrgUrl — skipping role assignment."
+            continue
+        }
+        $RoleId = $SysAdminRole[0].roleid
+
+        # Check whether the role is already assigned
+        $AssignedRole = (Invoke-RestMethod `
+                -Uri "$OrgUrl/api/data/v9.2/systemusers($UserId)/systemuserroles_association?`$filter=roleid eq $RoleId&`$select=roleid" `
+                -Headers $Headers).value
+
+        if ($AssignedRole.Count -gt 0) {
+            Write-Host '    System Administrator role already assigned (skipped)'
+        }
+        else {
+            $AssocBody = @{ '@odata.id' = "$OrgUrl/api/data/v9.2/roles($RoleId)" } | ConvertTo-Json
+            Invoke-RestMethod `
+                -Uri "$OrgUrl/api/data/v9.2/systemusers($UserId)/systemuserroles_association/`$ref" `
+                -Method Post -Headers $Headers -Body $AssocBody | Out-Null
+            Write-Host '    Assigned System Administrator role'
+        }
+    }
+
+    Write-Host '    Done.'
+}
 
 Write-Host ''
 Write-Host '============================================='
