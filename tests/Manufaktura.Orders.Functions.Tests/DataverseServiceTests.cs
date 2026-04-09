@@ -61,6 +61,41 @@ public class DataverseServiceTests
     }
 
     [Fact]
+    public async Task CountTotalDeliveryNotes_EmbedsRouteIdAndDateRangeInFilter()
+    {
+        var routeId = Guid.Parse("12345678-0000-0000-0000-000000000002");
+        var date = new DateTimeOffset(2026, 4, 6, 0, 0, 0, TimeSpan.Zero);
+
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(OkJson("""{"@odata.count":5,"value":[]}"""));
+
+        var service = CreateService(handler);
+        var count = await service.CountTotalDeliveryNotesAsync(routeId, date);
+
+        Assert.Equal(5, count);
+        Assert.Single(handler.SentRequests);
+        var decodedUrl = Uri.UnescapeDataString(handler.SentRequests[0].Url);
+        Assert.Contains("mb_deliverynotes", decodedUrl);
+        Assert.Contains("12345678-0000-0000-0000-000000000002", decodedUrl);
+        Assert.Contains("2026-04-06", decodedUrl);
+        Assert.Contains("2026-04-07", decodedUrl); // date range end = date + 1 day
+        Assert.Contains("$count=true", decodedUrl);
+        Assert.DoesNotContain("mb_url", decodedUrl); // total count must not filter by URL presence
+    }
+
+    [Fact]
+    public async Task CountTotalDeliveryNotes_ReturnsZeroWhenODataCountMissing()
+    {
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(OkJson("""{"value":[]}"""));
+
+        var service = CreateService(handler);
+        var count = await service.CountTotalDeliveryNotesAsync(Guid.NewGuid(), DateTimeOffset.UtcNow);
+
+        Assert.Equal(0, count);
+    }
+
+    [Fact]
     public async Task GetDeliveryNoteUrls_FollowsNextLinkAndAggregatesAllPages()
     {
         var handler = new FakeHttpMessageHandler();
