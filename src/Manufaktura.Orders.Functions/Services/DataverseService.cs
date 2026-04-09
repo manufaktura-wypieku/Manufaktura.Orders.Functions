@@ -115,7 +115,7 @@ public class DataverseService : IDataverseService
 
         var filter = $"_mb_deliveryroute_value eq {routeId:D}" +
                      $" and mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z" +
-                     $" and mb_url ne null and mb_url ne ''"; 
+                     $" and mb_url ne null and mb_url ne ''";
 
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes?$filter={Uri.EscapeDataString(filter)}&$count=true&$select=mb_deliverynoteid&$top=1";
         using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
