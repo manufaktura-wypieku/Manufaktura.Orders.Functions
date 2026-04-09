@@ -43,6 +43,7 @@ public class DataverseServiceTests
         Assert.Contains("12345678-0000-0000-0000-000000000001", decodedUrl);
         Assert.Contains("2026-04-06", decodedUrl);
         Assert.Contains("2026-04-07", decodedUrl); // date range end = date + 1 day
+        Assert.Contains("to='mb_customer'", decodedUrl); // logical name, not mb_customerid
     }
 
     [Fact]
