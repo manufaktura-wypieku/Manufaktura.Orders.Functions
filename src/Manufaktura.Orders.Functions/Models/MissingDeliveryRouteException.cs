@@ -9,4 +9,14 @@ public class MissingDeliveryRouteException : Exception
     {
         DeliveryNoteId = deliveryNoteId;
     }
+
+    public MissingDeliveryRouteException(string message)
+        : base(message)
+    {
+    }
+
+    public MissingDeliveryRouteException(string message, Exception innerException)
+        : base(message, innerException)
+    {
+    }
 }
