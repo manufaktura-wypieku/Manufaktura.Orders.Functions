@@ -35,7 +35,7 @@ public class DataverseService : IDataverseService
 
         var routeIdStr = root.GetProperty("_mb_deliveryroute_value").GetString();
         if (string.IsNullOrEmpty(routeIdStr))
-            throw new InvalidOperationException($"Delivery note '{id:D}' has no delivery route assigned (_mb_deliveryroute_value is null or empty).");
+            throw new MissingDeliveryRouteException(id);
         var routeId = Guid.Parse(routeIdStr);
         var deliveryDate = root.GetProperty("mb_deliverydate").GetDateTimeOffset();
 

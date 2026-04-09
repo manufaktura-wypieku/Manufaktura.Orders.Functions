@@ -112,10 +112,10 @@ public class GenerateDeliveryPack
                 StatusCode = StatusCodes.Status502BadGateway
             };
         }
-        catch (InvalidOperationException ex) when (ex.Message.Contains("has no delivery route assigned"))
+        catch (MissingDeliveryRouteException ex)
         {
             _logger.LogWarning(ex, "Delivery note {NoteId} has no delivery route assigned", noteId);
-            return new ObjectResult(new { error = ex.Message, code = "missing_delivery_route" })
+            return new ObjectResult(new { error = "Delivery note has no delivery route assigned.", code = "missing_delivery_route" })
             {
                 StatusCode = StatusCodes.Status422UnprocessableEntity
             };
