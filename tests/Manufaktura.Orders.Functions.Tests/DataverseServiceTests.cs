@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text;
+using Manufaktura.Orders.Functions.Models;
 using Manufaktura.Orders.Functions.Services;
 using Microsoft.Extensions.Configuration;
 using NSubstitute;
@@ -107,5 +108,33 @@ public class DataverseServiceTests
         Assert.Equal(2, handler.SentRequests.Count);
         Assert.Equal(HttpMethod.Post, handler.SentRequests[0].Method);
         Assert.Equal(HttpMethod.Get, handler.SentRequests[1].Method);
+    }
+
+    [Fact]
+    public async Task GetDeliveryNote_ThrowsMissingDeliveryRouteException_WhenRouteValueIsNull()
+    {
+        var noteId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(OkJson($$"""{"_mb_deliveryroute_value":null,"mb_deliverydate":"2026-04-07T00:00:00Z"}"""));
+
+        var service = CreateService(handler);
+        var ex = await Assert.ThrowsAsync<MissingDeliveryRouteException>(() => service.GetDeliveryNoteAsync(noteId));
+
+        Assert.Equal(noteId, ex.DeliveryNoteId);
+        Assert.Contains("has no delivery route assigned", ex.Message);
+    }
+
+    [Fact]
+    public async Task GetDeliveryNote_ThrowsMissingDeliveryRouteException_WhenRouteValueIsEmptyString()
+    {
+        var noteId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(OkJson($$"""{"_mb_deliveryroute_value":"","mb_deliverydate":"2026-04-07T00:00:00Z"}"""));
+
+        var service = CreateService(handler);
+        var ex = await Assert.ThrowsAsync<MissingDeliveryRouteException>(() => service.GetDeliveryNoteAsync(noteId));
+
+        Assert.Equal(noteId, ex.DeliveryNoteId);
+        Assert.Contains("has no delivery route assigned", ex.Message);
     }
 }
