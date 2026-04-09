@@ -10,7 +10,11 @@ namespace Manufaktura.Orders.Functions.Tests;
 public class SharePointServiceTests
 {
     private const string SiteUrl = "https://manufakturawypieku.sharepoint.com/sites/Manufaktura-DEV";
-    private const string SiteGraphUrlBase = "https://graph.microsoft.com/v1.0/sites/manufakturawypieku.sharepoint.com:/sites/Manufaktura-DEV";
+    private const string ResolvedSiteId = "manufakturawypieku.sharepoint.com,00000000-0000-0000-0000-000000000001,00000000-0000-0000-0000-000000000002";
+    private const string SiteGraphUrlBase = "https://graph.microsoft.com/v1.0/sites/" + ResolvedSiteId;
+
+    private static HttpResponseMessage SiteResolveResponse()
+        => new(HttpStatusCode.OK) { Content = new StringContent($"{{\"id\":\"{ResolvedSiteId}\"}}", Encoding.UTF8, "application/json") };
 
     private static SharePointService CreateService(FakeHttpMessageHandler handler)
     {
@@ -28,6 +32,7 @@ public class SharePointServiceTests
     public async Task SmallFile_SendsTwoFolderCreatesAndSimplePut_AndReturnsSharePointUrl()
     {
         var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(SiteResolveResponse());                          // GET site resolve
         handler.Enqueue(new HttpResponseMessage(HttpStatusCode.Created)); // POST DeliveryPacks folder
         handler.Enqueue(new HttpResponseMessage(HttpStatusCode.Created)); // POST route folder
         handler.Enqueue(new HttpResponseMessage(HttpStatusCode.Created)); // PUT content (simple upload)
@@ -36,25 +41,30 @@ public class SharePointServiceTests
         var pdf = new byte[100];
         var returnedUrl = await service.UploadDeliveryPackAsync("Route A", new DateTimeOffset(2026, 4, 6, 0, 0, 0, TimeSpan.Zero), pdf);
 
-        Assert.Equal(3, handler.SentRequests.Count);
+        Assert.Equal(4, handler.SentRequests.Count);
+
+        // Site resolution
+        var req0 = handler.SentRequests[0];
+        Assert.Equal(HttpMethod.Get, req0.Method);
+        Assert.Contains("/sites/manufakturawypieku.sharepoint.com:/sites/Manufaktura-DEV:", req0.Url);
 
         // Folder create 1: root/children for DeliveryPacks
-        var req0 = handler.SentRequests[0];
-        Assert.Equal(HttpMethod.Post, req0.Method);
-        Assert.Equal($"{SiteGraphUrlBase}/drive/root/children", req0.Url);
-        Assert.Contains("\"DeliveryPacks\"", req0.Body);
-        Assert.Contains("\"fail\"", req0.Body);
-
-        // Folder create 2: root:/DeliveryPacks:/children for route sub-folder
         var req1 = handler.SentRequests[1];
         Assert.Equal(HttpMethod.Post, req1.Method);
-        Assert.Equal($"{SiteGraphUrlBase}/drive/root:/DeliveryPacks:/children", req1.Url);
-        Assert.Contains("\"Route A\"", req1.Body);
+        Assert.Equal($"{SiteGraphUrlBase}/drive/root/children", req1.Url);
+        Assert.Contains("\"DeliveryPacks\"", req1.Body);
+        Assert.Contains("\"fail\"", req1.Body);
+
+        // Folder create 2: root:/DeliveryPacks:/children for route sub-folder
+        var req2 = handler.SentRequests[2];
+        Assert.Equal(HttpMethod.Post, req2.Method);
+        Assert.Equal($"{SiteGraphUrlBase}/drive/root:/DeliveryPacks:/children", req2.Url);
+        Assert.Contains("\"Route A\"", req2.Body);
 
         // Simple PUT to upload content
-        var req2 = handler.SentRequests[2];
-        Assert.Equal(HttpMethod.Put, req2.Method);
-        Assert.EndsWith(":/content", req2.Url);
+        var req3 = handler.SentRequests[3];
+        Assert.Equal(HttpMethod.Put, req3.Method);
+        Assert.EndsWith(":/content", req3.Url);
 
         Assert.Equal(
             "https://manufakturawypieku.sharepoint.com/sites/Manufaktura-DEV/Shared%20Documents/DeliveryPacks/Route%20A/2026-04-06-delivery-pack.pdf",
@@ -67,6 +77,7 @@ public class SharePointServiceTests
         // 4,100,000 bytes > 4,000,000 threshold → upload session path
         // Chunk size = 3,276,800 → two chunks: [0-3276799] + [3276800-4099999]
         var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(SiteResolveResponse());                          // GET site resolve
         handler.Enqueue(new HttpResponseMessage(HttpStatusCode.Created)); // POST DeliveryPacks folder
         handler.Enqueue(new HttpResponseMessage(HttpStatusCode.Created)); // POST route folder
         handler.Enqueue(OkJson("""{"uploadUrl":"https://upload.example.com/session"}""")); // createUploadSession
@@ -80,18 +91,18 @@ public class SharePointServiceTests
         var pdf = new byte[4_100_000];
         await service.UploadDeliveryPackAsync("Route A", new DateTimeOffset(2026, 4, 6, 0, 0, 0, TimeSpan.Zero), pdf);
 
-        Assert.Equal(5, handler.SentRequests.Count);
+        Assert.Equal(6, handler.SentRequests.Count);
 
-        var sessionReq = handler.SentRequests[2];
+        var sessionReq = handler.SentRequests[3];
         Assert.Equal(HttpMethod.Post, sessionReq.Method);
         Assert.Contains("createUploadSession", sessionReq.Url);
 
-        var chunk1 = handler.SentRequests[3];
+        var chunk1 = handler.SentRequests[4];
         Assert.Equal(HttpMethod.Put, chunk1.Method);
         Assert.Equal("https://upload.example.com/session", chunk1.Url);
         Assert.Equal("bytes 0-3276799/4100000", chunk1.ContentRange);
 
-        var chunk2 = handler.SentRequests[4];
+        var chunk2 = handler.SentRequests[5];
         Assert.Equal(HttpMethod.Put, chunk2.Method);
         Assert.Equal("https://upload.example.com/session", chunk2.Url);
         Assert.Equal("bytes 3276800-4099999/4100000", chunk2.ContentRange);

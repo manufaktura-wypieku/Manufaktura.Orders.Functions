@@ -1,4 +1,5 @@
 using System.Net.Http.Headers;
+using System.Text.Json;
 using Azure.Core;
 using Azure.Identity;
 using Microsoft.Extensions.Logging;
@@ -14,6 +15,7 @@ public class DocumentMergeService : IDocumentMergeService
     private readonly HttpClient _httpClient;
     private readonly DefaultAzureCredential _credential;
     private readonly ILogger<DocumentMergeService> _logger;
+    private string? _resolvedSiteId;
 
     public DocumentMergeService(HttpClient httpClient, DefaultAzureCredential credential, ILogger<DocumentMergeService> logger)
     {
@@ -64,13 +66,14 @@ public class DocumentMergeService : IDocumentMergeService
         var token = await _credential.GetTokenAsync(
             new TokenRequestContext(GraphScopes), cancellationToken);
 
-        // Graph REST API path-based site identifier format:
-        // /sites/{hostname}:/sites/{site-path}/drive/root:/{path}:/content?format=pdf
-        // The site identifier must NOT have a trailing ':' when followed by /drive/root:/{path};
-        // a trailing colon causes Graph to reject 'root:' as an unknown segment.
+        // Path-based site identifiers (hostname:/sites/name) cannot be chained with
+        // /drive/root:/{path}: addressing — Graph rejects nested colon-paths.
+        // Resolve the site to its opaque ID (hostname,collectionId,webId) first.
+        var resolvedSiteId = await ResolveSiteIdAsync(siteId, token.Token, cancellationToken);
+
         // Encode each path segment individually so '/' delimiters are preserved.
         var encodedPath = string.Join("/", itemPath.Split('/').Select(Uri.EscapeDataString));
-        var graphUrl = $"https://graph.microsoft.com/v1.0/sites/{siteId}/drive/root:/{encodedPath}:/content?format=pdf";
+        var graphUrl = $"https://graph.microsoft.com/v1.0/sites/{resolvedSiteId}/drive/root:/{encodedPath}:/content?format=pdf";
 
         _logger.LogInformation("Downloading PDF from Graph: {GraphUrl}", graphUrl);
 
@@ -90,6 +93,36 @@ public class DocumentMergeService : IDocumentMergeService
         await response.Content.CopyToAsync(memoryStream, cancellationToken);
         memoryStream.Position = 0;
         return memoryStream;
+    }
+
+    private async Task<string> ResolveSiteIdAsync(string pathBasedSiteId, string bearerToken, CancellationToken cancellationToken)
+    {
+        if (_resolvedSiteId is not null)
+            return _resolvedSiteId;
+
+        var resolveUrl = $"https://graph.microsoft.com/v1.0/sites/{pathBasedSiteId}:?$select=id";
+
+        _logger.LogInformation("Resolving site ID for '{PathBasedSiteId}'", pathBasedSiteId);
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, resolveUrl);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError("Site resolution failed {StatusCode} for '{PathBasedSiteId}': {ErrorBody}",
+                (int)response.StatusCode, pathBasedSiteId, errorBody);
+            response.EnsureSuccessStatusCode();
+        }
+
+        using var doc = await JsonDocument.ParseAsync(
+            await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        _resolvedSiteId = doc.RootElement.GetProperty("id").GetString()
+            ?? throw new InvalidOperationException("Graph did not return a site id.");
+
+        _logger.LogInformation("Resolved site '{PathBasedSiteId}' to '{ResolvedSiteId}'", pathBasedSiteId, _resolvedSiteId);
+        return _resolvedSiteId;
     }
 
     internal static (string siteId, string itemPath) ParseSharePointUrl(string url)

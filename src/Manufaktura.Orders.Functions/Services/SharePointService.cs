@@ -44,11 +44,17 @@ public class SharePointService : ISharePointService
         var itemPath = $"DeliveryPacks/{safeRouteName}/{fileName}";
 
         var (siteId, _) = DocumentMergeService.ParseSharePointUrl(_sharePointSiteUrl + "/Shared%20Documents/placeholder");
-        var encodedPath = string.Join("/", itemPath.Split('/').Select(Uri.EscapeDataString));
-        var siteGraphUrl = $"https://graph.microsoft.com/v1.0/sites/{siteId}";
-        var graphBaseUrl = $"{siteGraphUrl}/drive/root:/{encodedPath}:";
 
         var token = await _credential.GetTokenAsync(new TokenRequestContext(GraphScopes), cancellationToken);
+
+        // Path-based site identifiers (hostname:/sites/name) cannot be chained with
+        // /drive/root:/{path}: addressing — Graph rejects nested colon-paths.
+        // Resolve the site to its opaque ID (hostname,collectionId,webId) first.
+        var resolvedSiteId = await ResolveSiteIdAsync(siteId, token.Token, cancellationToken);
+
+        var encodedPath = string.Join("/", itemPath.Split('/').Select(Uri.EscapeDataString));
+        var siteGraphUrl = $"https://graph.microsoft.com/v1.0/sites/{resolvedSiteId}";
+        var graphBaseUrl = $"{siteGraphUrl}/drive/root:/{encodedPath}:";
 
         // Ensure the target folder hierarchy exists before uploading;
         // Graph does not create intermediate folders automatically for upload sessions.
@@ -196,6 +202,22 @@ public class SharePointService : ISharePointService
         foreach (var c in invalid)
             name = name.Replace(c, '_');
         return name.Trim();
+    }
+
+    private async Task<string> ResolveSiteIdAsync(string pathBasedSiteId, string bearerToken, CancellationToken cancellationToken)
+    {
+        var resolveUrl = $"https://graph.microsoft.com/v1.0/sites/{pathBasedSiteId}:?$select=id";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, resolveUrl);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        using var doc = await JsonDocument.ParseAsync(
+            await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        return doc.RootElement.GetProperty("id").GetString()
+            ?? throw new InvalidOperationException("Graph did not return a site id.");
     }
 }
 
