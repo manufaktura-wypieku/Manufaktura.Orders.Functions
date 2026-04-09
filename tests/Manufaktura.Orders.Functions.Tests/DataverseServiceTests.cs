@@ -3,6 +3,7 @@ using System.Text;
 using Manufaktura.Orders.Functions.Models;
 using Manufaktura.Orders.Functions.Services;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using NSubstitute;
 using Xunit;
 
@@ -16,7 +17,7 @@ public class DataverseServiceTests
     {
         var config = Substitute.For<IConfiguration>();
         config["DataverseUrl"].Returns(DataverseUrl);
-        return new DataverseService(new HttpClient(handler), new FakeTokenCredential(), config);
+        return new DataverseService(new HttpClient(handler), new FakeTokenCredential(), config, Substitute.For<ILogger<DataverseService>>());
     }
 
     private static HttpResponseMessage OkJson(string json)

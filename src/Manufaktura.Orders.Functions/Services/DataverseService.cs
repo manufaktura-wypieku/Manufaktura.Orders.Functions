@@ -4,6 +4,7 @@ using System.Text.Json;
 using Azure.Core;
 using Manufaktura.Orders.Functions.Models;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 
 namespace Manufaktura.Orders.Functions.Services;
 
@@ -13,11 +14,13 @@ public class DataverseService : IDataverseService
     private readonly TokenCredential _credential;
     private readonly string _dataverseUrl;
     private readonly string[] _scopes;
+    private readonly ILogger<DataverseService> _logger;
 
-    public DataverseService(HttpClient httpClient, TokenCredential credential, IConfiguration configuration)
+    public DataverseService(HttpClient httpClient, TokenCredential credential, IConfiguration configuration, ILogger<DataverseService> logger)
     {
         _httpClient = httpClient;
         _credential = credential;
+        _logger = logger;
         _dataverseUrl = (configuration["DataverseUrl"]
             ?? throw new InvalidOperationException("DataverseUrl configuration is required."))
             .TrimEnd('/');
@@ -289,6 +292,18 @@ public class DataverseService : IDataverseService
             request.Content = new StringContent(json, Encoding.UTF8, "application/json");
         }
 
-        return await _httpClient.SendAsync(request, cancellationToken);
+        var response = await _httpClient.SendAsync(request, cancellationToken);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = response.Content is not null
+                ? await response.Content.ReadAsStringAsync(cancellationToken)
+                : string.Empty;
+            _logger.LogError(
+                "Dataverse returned {StatusCode} for {Method} {Url}. Response body: {Body}",
+                (int)response.StatusCode, method.Method, url, errorBody);
+        }
+
+        return response;
     }
 }
