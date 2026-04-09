@@ -61,7 +61,7 @@ public class DataverseService : IDataverseService
                 <filter type='and'>
                   <condition attribute='statecode' operator='eq' value='1' />
                   <condition attribute='mb_deliverydate' operator='on-or-after' value='{dateFrom}' />
-                  <condition attribute='mb_deliverydate' operator='before' value='{dateTo}' />
+                  <condition attribute='mb_deliverydate' operator='lt' value='{dateTo}' />
                 </filter>
                 <link-entity name='account' from='accountid' to='mb_customer' link-type='inner'>
                   <filter type='and'>
