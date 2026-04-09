@@ -33,7 +33,10 @@ public class DataverseService : IDataverseService
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
         var root = doc.RootElement;
 
-        var routeId = Guid.Parse(root.GetProperty("_mb_deliveryroute_value").GetString()!);
+        var routeIdStr = root.GetProperty("_mb_deliveryroute_value").GetString();
+        if (string.IsNullOrEmpty(routeIdStr))
+            throw new InvalidOperationException($"Delivery note '{id:D}' has no delivery route assigned (_mb_deliveryroute_value is null).");
+        var routeId = Guid.Parse(routeIdStr);
         var deliveryDate = root.GetProperty("mb_deliverydate").GetDateTimeOffset();
 
         return new DeliveryNoteRecord(id, routeId, deliveryDate);

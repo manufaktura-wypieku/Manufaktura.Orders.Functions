@@ -194,6 +194,20 @@ public class GenerateDeliveryPackTests
         await _dataverse.Received(1).UpdateDeliveryPackFailedAsync(PackId, Arg.Any<string>(), Arg.Any<CancellationToken>());
     }
 
+    [Fact]
+    public async Task Returns422WhenDeliveryNoteHasNoRoute()
+    {
+        _dataverse.GetDeliveryNoteAsync(NoteId, Arg.Any<CancellationToken>())
+            .ThrowsAsync(new InvalidOperationException($"Delivery note '{NoteId:D}' has no delivery route assigned (_mb_deliveryroute_value is null)."));
+
+        var request = CreateHttpRequest(new { deliveryNoteId = NoteId });
+        var result = await _function.Run(request, CancellationToken.None);
+
+        var error = Assert.IsType<ObjectResult>(result);
+        Assert.Equal(422, error.StatusCode);
+        AssertErrorCode(error.Value, "missing_delivery_route");
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private void SetupNote() =>

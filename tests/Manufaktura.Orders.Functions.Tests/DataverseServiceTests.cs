@@ -108,4 +108,32 @@ public class DataverseServiceTests
         Assert.Equal(HttpMethod.Post, handler.SentRequests[0].Method);
         Assert.Equal(HttpMethod.Get, handler.SentRequests[1].Method);
     }
+
+    [Fact]
+    public async Task GetDeliveryNote_ThrowsInvalidOperationException_WhenRouteValueIsNull()
+    {
+        var noteId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(OkJson($$"""{"_mb_deliveryroute_value":null,"mb_deliverydate":"2026-04-07T00:00:00Z"}"""));
+
+        var service = CreateService(handler);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.GetDeliveryNoteAsync(noteId));
+
+        Assert.Contains(noteId.ToString("D"), ex.Message);
+        Assert.Contains("has no delivery route assigned", ex.Message);
+    }
+
+    [Fact]
+    public async Task GetDeliveryNote_ThrowsInvalidOperationException_WhenRouteValueIsEmptyString()
+    {
+        var noteId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(OkJson($$"""{"_mb_deliveryroute_value":"","mb_deliverydate":"2026-04-07T00:00:00Z"}"""));
+
+        var service = CreateService(handler);
+        var ex = await Assert.ThrowsAsync<InvalidOperationException>(() => service.GetDeliveryNoteAsync(noteId));
+
+        Assert.Contains(noteId.ToString("D"), ex.Message);
+        Assert.Contains("has no delivery route assigned", ex.Message);
+    }
 }
