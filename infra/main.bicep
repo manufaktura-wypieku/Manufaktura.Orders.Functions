@@ -163,7 +163,10 @@ resource storageBlobContributor 'Microsoft.Authorization/roleAssignments@2022-04
   name: guid(storageAccount.id, functionApp.id, storageBlobDataContributorRoleId)
   scope: storageAccount
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageBlobDataContributorRoleId)
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      storageBlobDataContributorRoleId
+    )
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
   }
@@ -173,7 +176,10 @@ resource storageQueueContributor 'Microsoft.Authorization/roleAssignments@2022-0
   name: guid(storageAccount.id, functionApp.id, storageQueueDataContributorRoleId)
   scope: storageAccount
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageQueueDataContributorRoleId)
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      storageQueueDataContributorRoleId
+    )
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
   }
@@ -183,7 +189,10 @@ resource storageTableContributor 'Microsoft.Authorization/roleAssignments@2022-0
   name: guid(storageAccount.id, functionApp.id, storageTableDataContributorRoleId)
   scope: storageAccount
   properties: {
-    roleDefinitionId: subscriptionResourceId('Microsoft.Authorization/roleDefinitions', storageTableDataContributorRoleId)
+    roleDefinitionId: subscriptionResourceId(
+      'Microsoft.Authorization/roleDefinitions',
+      storageTableDataContributorRoleId
+    )
     principalId: functionApp.identity.principalId
     principalType: 'ServicePrincipal'
   }
@@ -195,5 +204,5 @@ output functionAppName string = functionApp.name
 @description('Function App default hostname.')
 output functionAppHostname string = functionApp.properties.defaultHostName
 
-@description('Managed Identity principal ID — grant this Files.Read.All on Microsoft Graph for SharePoint access.')
+@description('Managed Identity principal ID — run setup-github-oidc.ps1 to grant Sites.ReadWrite.All on Microsoft Graph for SharePoint access.')
 output managedIdentityPrincipalId string = functionApp.identity.principalId

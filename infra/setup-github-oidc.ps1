@@ -250,6 +250,72 @@ if ($DataverseEnvs) {
     Write-Host '    Done.'
 }
 
+# Grant Microsoft Graph API permissions to each Function App managed identity.
+# The system-assigned managed identity only exists after main.bicep has been deployed,
+# so this section gracefully skips environments where the Function App doesn't exist yet.
+# Re-run this script after the first deployment to pick up the Graph permissions.
+$GraphAppId = '00000003-0000-0000-c000-000000000000'
+# Sites.ReadWrite.All application permission — read/write items in all site collections
+$SitesReadWriteAllRoleId = '9492366f-7969-46a4-8d15-ed1a20078fff'
+
+Write-Host ''
+Write-Host '==> Granting Microsoft Graph permissions to Function App managed identities...'
+
+$GraphSpId = az ad sp show --id $GraphAppId --query id -o tsv 2>$null
+if (-not $GraphSpId) {
+    Write-Warning 'Could not find Microsoft Graph service principal — skipping Graph permissions.'
+}
+else {
+    foreach ($EnvName in @('dev', 'test', 'prod')) {
+        $FuncName = "func-mfk-orders-$EnvName"
+        $RgName = "rg-manufaktura-orders-$EnvName"
+
+        Write-Host ''
+        Write-Host "    $FuncName ($RgName):"
+
+        $MiPrincipalId = az functionapp identity show `
+            --name $FuncName --resource-group $RgName `
+            --query principalId -o tsv 2>$null
+
+        if (-not $MiPrincipalId) {
+            Write-Host '    Function App not deployed yet — skipping. Re-run after deploying infrastructure.'
+            continue
+        }
+        Write-Host "    Managed Identity: $MiPrincipalId"
+
+        $AssignmentsJson = az rest --method GET `
+            --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$MiPrincipalId/appRoleAssignments" `
+            -o json 2>&1
+
+        $AlreadyGranted = $false
+        if ($LASTEXITCODE -eq 0) {
+            $Assignments = $AssignmentsJson | ConvertFrom-Json
+            $AlreadyGranted = $Assignments.value | Where-Object {
+                $_.appRoleId -eq $SitesReadWriteAllRoleId -and $_.resourceId -eq $GraphSpId
+            }
+        }
+
+        if ($AlreadyGranted) {
+            Write-Host '    Sites.ReadWrite.All already granted (skipped)'
+        }
+        else {
+            $Body = (@{
+                principalId = $MiPrincipalId
+                resourceId  = $GraphSpId
+                appRoleId   = $SitesReadWriteAllRoleId
+            } | ConvertTo-Json -Compress) -replace '"', '\"'
+
+            az rest --method POST `
+                --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$MiPrincipalId/appRoleAssignments" `
+                --body "$Body" `
+                --headers "Content-Type=application/json" `
+                --output none
+
+            Write-Host '    Granted Sites.ReadWrite.All'
+        }
+    }
+}
+
 Write-Host ''
 Write-Host '============================================='
 Write-Host ' Setup complete!'
