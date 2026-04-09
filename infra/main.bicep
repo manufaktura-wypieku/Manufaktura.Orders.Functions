@@ -10,6 +10,12 @@ param location string = resourceGroup().location
 @maxValue(200)
 param maximumInstanceCount int = 10
 
+@description('Dataverse environment URL, e.g. https://org.crm.dynamics.com')
+param dataverseUrl string
+
+@description('SharePoint site URL, e.g. https://tenant.sharepoint.com/sites/name')
+param sharePointSiteUrl string
+
 // Naming convention
 var suffix = 'mfk-orders-${environmentName}'
 var storageNamePrefix = toLower(replace('stmfkord${environmentName}', '-', ''))
@@ -111,6 +117,14 @@ resource functionApp 'Microsoft.Web/sites@2024-04-01' = {
         {
           name: 'APPLICATIONINSIGHTS_CONNECTION_STRING'
           value: appInsights.properties.ConnectionString
+        }
+        {
+          name: 'DataverseUrl'
+          value: dataverseUrl
+        }
+        {
+          name: 'SharePointSiteUrl'
+          value: sharePointSiteUrl
         }
       ]
     }
