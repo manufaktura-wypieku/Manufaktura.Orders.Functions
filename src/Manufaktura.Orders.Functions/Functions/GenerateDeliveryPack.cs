@@ -123,7 +123,8 @@ public class GenerateDeliveryPack
 
         _logger.LogInformation("Delivery note {NoteId}: route={RouteId}, date={Date}", noteId, note.RouteId, note.DeliveryDate.Date);
 
-        // Step 2: Count completed orders for the route/date.
+        // Step 2: Count completed orders for the route/date — used only as an early-exit guard.
+        // This avoids Dataverse calls for routes/dates with no activity at all.
         var orderCount = await _dataverse.CountCompletedOrdersByRouteAndDateAsync(note.RouteId, note.DeliveryDate, cancellationToken);
         _logger.LogInformation("Completed orders for route {RouteId} on {Date}: {Count}", note.RouteId, note.DeliveryDate.Date, orderCount);
 
@@ -134,15 +135,19 @@ public class GenerateDeliveryPack
             return new OkObjectResult(new { status = "skipped", reason = "no_orders", orderCount });
         }
 
-        // Step 4: Count delivery notes with a SharePoint URL for the route/date.
-        var noteCount = await _dataverse.CountDeliveryNotesWithUrlAsync(note.RouteId, note.DeliveryDate, cancellationToken);
-        _logger.LogInformation("Delivery notes with URL for route {RouteId} on {Date}: {Count}", note.RouteId, note.DeliveryDate.Date, noteCount);
+        // Step 4: Count total delivery notes and those with a URL for the route/date.
+        // We compare these two counts rather than comparing notes to orders because:
+        // - Not every inactive order necessarily has a delivery note (e.g. cancelled orders)
+        // - The readiness criterion is "all existing delivery notes have been uploaded to SharePoint"
+        var totalNoteCount = await _dataverse.CountTotalDeliveryNotesAsync(note.RouteId, note.DeliveryDate, cancellationToken);
+        var notesWithUrlCount = await _dataverse.CountDeliveryNotesWithUrlAsync(note.RouteId, note.DeliveryDate, cancellationToken);
+        _logger.LogInformation("Delivery notes for route {RouteId} on {Date}: {WithUrl}/{Total} have a URL", note.RouteId, note.DeliveryDate.Date, notesWithUrlCount, totalNoteCount);
 
         // Step 5: Exit if not all delivery notes are ready.
-        if (noteCount < orderCount)
+        if (totalNoteCount == 0 || notesWithUrlCount < totalNoteCount)
         {
-            _logger.LogInformation("Not all delivery notes ready ({NoteCount}/{OrderCount}). Exiting.", noteCount, orderCount);
-            return new OkObjectResult(new { status = "skipped", reason = "not_all_notes_ready", noteCount, orderCount });
+            _logger.LogInformation("Not all delivery notes ready ({WithUrl}/{Total}). Exiting.", notesWithUrlCount, totalNoteCount);
+            return new OkObjectResult(new { status = "skipped", reason = "not_all_notes_ready", notesWithUrlCount, totalNoteCount });
         }
 
         // Step 6: Check for an existing delivery pack (for the concurrency guard).

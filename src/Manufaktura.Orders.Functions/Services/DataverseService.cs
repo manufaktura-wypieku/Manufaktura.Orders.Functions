@@ -92,6 +92,22 @@ public class DataverseService : IDataverseService
         };
     }
 
+    public async Task<int> CountTotalDeliveryNotesAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default)
+    {
+        var dateFrom = deliveryDate.UtcDateTime.Date.ToString("yyyy-MM-dd");
+        var dateTo = deliveryDate.UtcDateTime.Date.AddDays(1).ToString("yyyy-MM-dd");
+
+        var filter = $"_mb_deliveryroute_value eq {routeId:D}" +
+                     $" and mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z";
+
+        var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes?$filter={Uri.EscapeDataString(filter)}&$count=true&$select=mb_deliverynoteid&$top=1";
+        using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        return doc.RootElement.TryGetProperty("@odata.count", out var countProp) ? countProp.GetInt32() : 0;
+    }
+
     public async Task<int> CountDeliveryNotesWithUrlAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default)
     {
         var dateFrom = deliveryDate.UtcDateTime.Date.ToString("yyyy-MM-dd");
@@ -99,7 +115,7 @@ public class DataverseService : IDataverseService
 
         var filter = $"_mb_deliveryroute_value eq {routeId:D}" +
                      $" and mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z" +
-                     $" and mb_url ne null and mb_url ne ''";
+                     $" and mb_url ne null and mb_url ne ''"; 
 
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes?$filter={Uri.EscapeDataString(filter)}&$count=true&$select=mb_deliverynoteid&$top=1";
         using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);

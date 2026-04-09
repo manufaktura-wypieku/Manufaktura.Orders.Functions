@@ -15,6 +15,11 @@ public interface IDataverseService
     Task<int> CountCompletedOrdersByRouteAndDateAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Counts all delivery notes for the given route and delivery date, regardless of whether mb_url is populated.
+    /// </summary>
+    Task<int> CountTotalDeliveryNotesAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Counts delivery notes for the given route and delivery date that have a SharePoint URL (mb_url) populated.
     /// </summary>
     Task<int> CountDeliveryNotesWithUrlAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default);
