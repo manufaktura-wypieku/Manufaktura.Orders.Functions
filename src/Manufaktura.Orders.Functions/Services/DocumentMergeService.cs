@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using Azure.Core;
 using Azure.Identity;
+using Microsoft.Extensions.Logging;
 using PdfSharp.Pdf;
 using PdfSharp.Pdf.IO;
 
@@ -12,11 +13,13 @@ public class DocumentMergeService : IDocumentMergeService
 
     private readonly HttpClient _httpClient;
     private readonly DefaultAzureCredential _credential;
+    private readonly ILogger<DocumentMergeService> _logger;
 
-    public DocumentMergeService(HttpClient httpClient, DefaultAzureCredential credential)
+    public DocumentMergeService(HttpClient httpClient, DefaultAzureCredential credential, ILogger<DocumentMergeService> logger)
     {
         _httpClient = httpClient;
         _credential = credential;
+        _logger = logger;
     }
 
     public async Task<byte[]> MergeDocumentsAsync(string[] documentUrls, CancellationToken cancellationToken = default)
@@ -73,11 +76,19 @@ public class DocumentMergeService : IDocumentMergeService
         var encodedPath = string.Join("/", itemPath.Split('/').Select(Uri.EscapeDataString));
         var graphUrl = $"https://graph.microsoft.com/v1.0/sites/{normalizedSiteId}/drive/root:/{encodedPath}:/content?format=pdf";
 
+        _logger.LogInformation("Downloading PDF from Graph: {GraphUrl}", graphUrl);
+
         using var request = new HttpRequestMessage(HttpMethod.Get, graphUrl);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", token.Token);
 
         using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken);
-        response.EnsureSuccessStatusCode();
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(cancellationToken);
+            _logger.LogError("Graph download failed {StatusCode} for {GraphUrl}: {ErrorBody}",
+                (int)response.StatusCode, graphUrl, errorBody);
+            response.EnsureSuccessStatusCode();
+        }
 
         var memoryStream = new MemoryStream();
         await response.Content.CopyToAsync(memoryStream, cancellationToken);
