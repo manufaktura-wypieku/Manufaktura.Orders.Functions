@@ -116,7 +116,6 @@ public class GenerateDeliveryPackTests
         SetupNote();
         _dataverse.CountCompletedOrdersByRouteAndDateAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>()).Returns(2);
         _dataverse.CountTotalDeliveryNotesAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>()).Returns(0);
-        _dataverse.CountDeliveryNotesWithUrlAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>()).Returns(0);
 
         var request = CreateHttpRequest(new { deliveryNoteId = NoteId });
         var result = await _function.Run(request, CancellationToken.None);
@@ -124,6 +123,7 @@ public class GenerateDeliveryPackTests
         var ok = Assert.IsType<OkObjectResult>(result);
         AssertStatus(ok.Value, "skipped");
         AssertCode(ok.Value, "not_all_notes_ready");
+        await _dataverse.DidNotReceive().CountDeliveryNotesWithUrlAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
