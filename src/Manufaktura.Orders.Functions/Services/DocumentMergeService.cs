@@ -73,7 +73,11 @@ public class DocumentMergeService : IDocumentMergeService
 
         // Encode each path segment individually so '/' delimiters are preserved.
         var encodedPath = string.Join("/", itemPath.Split('/').Select(Uri.EscapeDataString));
-        var graphUrl = $"https://graph.microsoft.com/v1.0/sites/{resolvedSiteId}/drive/root:/{encodedPath}:/content?format=pdf";
+        var graphUrl = $"https://graph.microsoft.com/v1.0/sites/{resolvedSiteId}/drive/root:/{encodedPath}:/content";
+
+        // Only request PDF conversion if the source file isn't already a PDF.
+        if (!itemPath.EndsWith(".pdf", StringComparison.OrdinalIgnoreCase))
+            graphUrl += "?format=pdf";
 
         _logger.LogInformation("Downloading PDF from Graph: {GraphUrl}", graphUrl);
 

@@ -300,10 +300,10 @@ else {
         }
         else {
             $Body = (@{
-                principalId = $MiPrincipalId
-                resourceId  = $GraphSpId
-                appRoleId   = $SitesReadWriteAllRoleId
-            } | ConvertTo-Json -Compress) -replace '"', '\"'
+                    principalId = $MiPrincipalId
+                    resourceId  = $GraphSpId
+                    appRoleId   = $SitesReadWriteAllRoleId
+                } | ConvertTo-Json -Compress) -replace '"', '\"'
 
             az rest --method POST `
                 --uri "https://graph.microsoft.com/v1.0/servicePrincipals/$MiPrincipalId/appRoleAssignments" `
