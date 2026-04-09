@@ -64,17 +64,13 @@ public class DocumentMergeService : IDocumentMergeService
         var token = await _credential.GetTokenAsync(
             new TokenRequestContext(GraphScopes), cancellationToken);
 
-        // Graph REST API:
-        // - path-based site identifier: /sites/{hostname}:/sites/{site-path}:/drive/root:/{path}:/content?format=pdf
-        // - resolved Graph site id:   /sites/{site-id}/drive/root:/{path}:/content?format=pdf
-        // Normalize path-based site identifiers to include the trailing ':' before /drive.
-        var normalizedSiteId = siteId.Contains(',', StringComparison.Ordinal)
-            ? siteId
-            : siteId.EndsWith(":", StringComparison.Ordinal) ? siteId : $"{siteId}:";
-
+        // Graph REST API path-based site identifier format:
+        // /sites/{hostname}:/sites/{site-path}/drive/root:/{path}:/content?format=pdf
+        // The site identifier must NOT have a trailing ':' when followed by /drive/root:/{path};
+        // a trailing colon causes Graph to reject 'root:' as an unknown segment.
         // Encode each path segment individually so '/' delimiters are preserved.
         var encodedPath = string.Join("/", itemPath.Split('/').Select(Uri.EscapeDataString));
-        var graphUrl = $"https://graph.microsoft.com/v1.0/sites/{normalizedSiteId}/drive/root:/{encodedPath}:/content?format=pdf";
+        var graphUrl = $"https://graph.microsoft.com/v1.0/sites/{siteId}/drive/root:/{encodedPath}:/content?format=pdf";
 
         _logger.LogInformation("Downloading PDF from Graph: {GraphUrl}", graphUrl);
 

@@ -10,7 +10,7 @@ namespace Manufaktura.Orders.Functions.Tests;
 public class SharePointServiceTests
 {
     private const string SiteUrl = "https://manufakturawypieku.sharepoint.com/sites/Manufaktura-DEV";
-    private const string SiteGraphUrlBase = "https://graph.microsoft.com/v1.0/sites/manufakturawypieku.sharepoint.com:/sites/Manufaktura-DEV:";
+    private const string SiteGraphUrlBase = "https://graph.microsoft.com/v1.0/sites/manufakturawypieku.sharepoint.com:/sites/Manufaktura-DEV";
 
     private static SharePointService CreateService(FakeHttpMessageHandler handler)
     {
