@@ -33,12 +33,22 @@ public interface IDataverseService
     /// Creates a new delivery pack record in Generating status.
     /// Returns <c>created = false</c> when Dataverse returned 409 Conflict (concurrent creation).
     /// </summary>
-    Task<(Guid packId, bool created)> CreateDeliveryPackAsync(Guid routeId, DateTimeOffset deliveryDate, int notesCount, CancellationToken cancellationToken = default);
+    /// <param name="routeId">The delivery route identifier for the pack.</param>
+    /// <param name="deliveryDate">The delivery date the pack is created for.</param>
+    /// <param name="notesCount">The expected number of delivery notes in the pack.</param>
+    /// <param name="packName">The display name to store in Dataverse <c>mb_name</c>. Null, empty, or whitespace values are ignored.</param>
+    /// <param name="cancellationToken">A token used to cancel the operation.</param>
+    Task<(Guid packId, bool created)> CreateDeliveryPackAsync(Guid routeId, DateTimeOffset deliveryDate, int notesCount, string? packName, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Sets an existing delivery pack to Generating status and updates the expected notes count.
+    /// Sets an existing delivery pack to Generating status, updates the expected notes count,
+    /// and updates <c>mb_name</c> when a non-null, non-whitespace pack name is provided.
     /// </summary>
-    Task SetDeliveryPackGeneratingAsync(Guid packId, int notesCount, CancellationToken cancellationToken = default);
+    /// <param name="packId">The ID of the existing delivery pack to update.</param>
+    /// <param name="notesCount">The expected number of notes in the delivery pack.</param>
+    /// <param name="packName">The delivery pack name to store in <c>mb_name</c>. If null, empty, or whitespace, the existing name is left unchanged.</param>
+    /// <param name="cancellationToken">A token used to cancel the operation.</param>
+    Task SetDeliveryPackGeneratingAsync(Guid packId, int notesCount, string? packName, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Returns the SharePoint URLs of all delivery notes for the given route and delivery date that have mb_url populated.

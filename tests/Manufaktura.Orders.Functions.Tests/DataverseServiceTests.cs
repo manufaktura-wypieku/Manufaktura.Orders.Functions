@@ -122,10 +122,11 @@ public class DataverseServiceTests
         handler.Enqueue(response201);
 
         var service = CreateService(handler);
-        var (packId, created) = await service.CreateDeliveryPackAsync(Guid.NewGuid(), DateTimeOffset.UtcNow, 5);
+        var (packId, created) = await service.CreateDeliveryPackAsync(Guid.NewGuid(), DateTimeOffset.UtcNow, 5, "Test Pack");
 
         Assert.True(created);
         Assert.Equal(newPackId, packId);
+        Assert.Contains("\"mb_name\":\"Test Pack\"", handler.SentRequests[0].Body);
     }
 
     [Fact]
@@ -138,12 +139,13 @@ public class DataverseServiceTests
         handler.Enqueue(OkJson($$"""{"value":[{"mb_deliverypackid":"{{existingPackId:D}}","mb_statusreason":1}]}""")); // GET re-query → 200
 
         var service = CreateService(handler);
-        var (packId, created) = await service.CreateDeliveryPackAsync(Guid.NewGuid(), DateTimeOffset.UtcNow, 5);
+        var (packId, created) = await service.CreateDeliveryPackAsync(Guid.NewGuid(), DateTimeOffset.UtcNow, 5, "Test Pack");
 
         Assert.False(created);
         Assert.Equal(existingPackId, packId);
         Assert.Equal(2, handler.SentRequests.Count);
         Assert.Equal(HttpMethod.Post, handler.SentRequests[0].Method);
+        Assert.Contains("\"mb_name\":\"Test Pack\"", handler.SentRequests[0].Body);
         Assert.Equal(HttpMethod.Get, handler.SentRequests[1].Method);
     }
 
@@ -159,6 +161,24 @@ public class DataverseServiceTests
 
         Assert.Equal(noteId, ex.DeliveryNoteId);
         Assert.Contains("has no delivery route assigned", ex.Message);
+    }
+
+    [Fact]
+    public async Task CreateDeliveryPack_NullPackName_OmitsMbNameFromBody()
+    {
+        var newPackId = Guid.Parse("aaaaaaaa-0001-0001-0001-000000000001");
+        var response201 = new HttpResponseMessage(HttpStatusCode.Created);
+        response201.Headers.TryAddWithoutValidation("OData-EntityId",
+            $"{DataverseUrl}/api/data/v9.2/mb_deliverypacks({newPackId:D})");
+
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(response201);
+
+        var service = CreateService(handler);
+        var (packId, created) = await service.CreateDeliveryPackAsync(Guid.NewGuid(), DateTimeOffset.UtcNow, 5, null);
+
+        Assert.True(created);
+        Assert.DoesNotContain("mb_name", handler.SentRequests[0].Body);
     }
 
     [Fact]
