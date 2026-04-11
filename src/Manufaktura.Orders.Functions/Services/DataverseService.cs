@@ -156,12 +156,13 @@ public class DataverseService : IDataverseService
         // Anonymous types cannot have such property names, so we use a dictionary.
         var body = new Dictionary<string, object?>
         {
-            ["mb_name"] = packName,
             ["mb_deliverydate"] = deliveryDate.UtcDateTime,
             ["mb_statusreason"] = DeliveryPackStatus.Generating,
             ["mb_notescount"] = notesCount,
             ["mb_deliveryroute@odata.bind"] = $"/mb_deliveryroutes({routeId:D})"
         };
+        if (!string.IsNullOrWhiteSpace(packName))
+            body["mb_name"] = packName;
 
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverypacks";
         using var response = await SendAsync(HttpMethod.Post, url, body, cancellationToken);
@@ -195,10 +196,11 @@ public class DataverseService : IDataverseService
     {
         var body = new Dictionary<string, object?>
         {
-            ["mb_name"] = packName,
             ["mb_statusreason"] = DeliveryPackStatus.Generating,
             ["mb_notescount"] = notesCount
         };
+        if (!string.IsNullOrWhiteSpace(packName))
+            body["mb_name"] = packName;
 
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverypacks({packId:D})";
         using var response = await SendAsync(HttpMethod.Patch, url, body, cancellationToken);

@@ -182,7 +182,7 @@ public class GenerateDeliveryPack
         var routeName = await _dataverse.GetDeliveryRouteNameAsync(note.RouteId, cancellationToken);
         if (string.IsNullOrWhiteSpace(routeName))
             routeName = note.RouteId.ToString("D");
-        var packName = $"{routeName} - {note.DeliveryDate.UtcDateTime:yyyy-MM-dd}";
+        var packName = $"{routeName} - {note.DeliveryDate:yyyy-MM-dd}";
 
         // Step 9: Upsert delivery pack (create or update to Generating).
         Guid packId;
