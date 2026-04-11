@@ -126,6 +126,7 @@ public class DataverseServiceTests
 
         Assert.True(created);
         Assert.Equal(newPackId, packId);
+        Assert.Contains("\"mb_name\":\"Test Pack\"", handler.SentRequests[0].Body);
     }
 
     [Fact]
@@ -144,6 +145,7 @@ public class DataverseServiceTests
         Assert.Equal(existingPackId, packId);
         Assert.Equal(2, handler.SentRequests.Count);
         Assert.Equal(HttpMethod.Post, handler.SentRequests[0].Method);
+        Assert.Contains("\"mb_name\":\"Test Pack\"", handler.SentRequests[0].Body);
         Assert.Equal(HttpMethod.Get, handler.SentRequests[1].Method);
     }
 
