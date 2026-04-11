@@ -178,18 +178,24 @@ public class GenerateDeliveryPack
             return new OkObjectResult(new { status = "skipped", reason = "no_document_urls" });
         }
 
+        // Step 8b: Fetch delivery route name for pack naming and SharePoint upload path.
+        var routeName = await _dataverse.GetDeliveryRouteNameAsync(note.RouteId, cancellationToken);
+        if (string.IsNullOrWhiteSpace(routeName))
+            routeName = note.RouteId.ToString("D");
+        var packName = $"{routeName} - {note.DeliveryDate.UtcDateTime:yyyy-MM-dd}";
+
         // Step 9: Upsert delivery pack (create or update to Generating).
         Guid packId;
 
         if (existingPack is not null)
         {
             packId = existingPack.Id;
-            await _dataverse.SetDeliveryPackGeneratingAsync(packId, documentUrls.Length, cancellationToken);
+            await _dataverse.SetDeliveryPackGeneratingAsync(packId, documentUrls.Length, packName, cancellationToken);
             _logger.LogInformation("Updated existing delivery pack {PackId} to Generating with {NoteCount} notes.", packId, documentUrls.Length);
         }
         else
         {
-            var (newPackId, created) = await _dataverse.CreateDeliveryPackAsync(note.RouteId, note.DeliveryDate, documentUrls.Length, cancellationToken);
+            var (newPackId, created) = await _dataverse.CreateDeliveryPackAsync(note.RouteId, note.DeliveryDate, documentUrls.Length, packName, cancellationToken);
             packId = newPackId;
             if (!created)
             {
@@ -207,9 +213,6 @@ public class GenerateDeliveryPack
             _logger.LogInformation("Merge complete: {Size} bytes for pack {PackId}.", pdfBytes.Length, packId);
 
             // Step 11: Upload merged PDF to SharePoint /DeliveryPacks/{RouteName}/
-            var routeName = await _dataverse.GetDeliveryRouteNameAsync(note.RouteId, cancellationToken);
-            if (string.IsNullOrWhiteSpace(routeName))
-                routeName = note.RouteId.ToString("D");
             var sharePointUrl = await _sharePoint.UploadDeliveryPackAsync(routeName, note.DeliveryDate, pdfBytes, cancellationToken);
             _logger.LogInformation("Uploaded delivery pack PDF to {Url} for pack {PackId}.", sharePointUrl, packId);
 

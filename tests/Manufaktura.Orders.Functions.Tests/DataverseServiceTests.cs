@@ -122,7 +122,7 @@ public class DataverseServiceTests
         handler.Enqueue(response201);
 
         var service = CreateService(handler);
-        var (packId, created) = await service.CreateDeliveryPackAsync(Guid.NewGuid(), DateTimeOffset.UtcNow, 5);
+        var (packId, created) = await service.CreateDeliveryPackAsync(Guid.NewGuid(), DateTimeOffset.UtcNow, 5, "Test Pack");
 
         Assert.True(created);
         Assert.Equal(newPackId, packId);
@@ -138,7 +138,7 @@ public class DataverseServiceTests
         handler.Enqueue(OkJson($$"""{"value":[{"mb_deliverypackid":"{{existingPackId:D}}","mb_statusreason":1}]}""")); // GET re-query → 200
 
         var service = CreateService(handler);
-        var (packId, created) = await service.CreateDeliveryPackAsync(Guid.NewGuid(), DateTimeOffset.UtcNow, 5);
+        var (packId, created) = await service.CreateDeliveryPackAsync(Guid.NewGuid(), DateTimeOffset.UtcNow, 5, "Test Pack");
 
         Assert.False(created);
         Assert.Equal(existingPackId, packId);

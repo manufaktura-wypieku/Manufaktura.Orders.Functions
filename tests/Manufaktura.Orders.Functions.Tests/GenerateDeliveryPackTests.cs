@@ -91,7 +91,7 @@ public class GenerateDeliveryPackTests
         var ok = Assert.IsType<OkObjectResult>(result);
         AssertStatus(ok.Value, "skipped");
         AssertCode(ok.Value, "no_document_urls");
-        await _dataverse.DidNotReceive().CreateDeliveryPackAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _dataverse.DidNotReceive().CreateDeliveryPackAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -148,12 +148,12 @@ public class GenerateDeliveryPackTests
         SetupNote();
         SetupCounts(orderCount: 2, noteCount: 2);
         _dataverse.GetDeliveryPackAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>()).Returns((DeliveryPackRecord?)null);
-        _dataverse.CreateDeliveryPackAsync(RouteId, DeliveryDate, 2, Arg.Any<CancellationToken>()).Returns((PackId, true));
         _dataverse.GetDeliveryNoteUrlsAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>())
             .Returns(["https://sp.example.com/sites/Dev/Shared%20Documents/note1.pdf",
                       "https://sp.example.com/sites/Dev/Shared%20Documents/note2.pdf"]);
-        _mergeService.MergeDocumentsAsync(Arg.Any<string[]>(), Arg.Any<CancellationToken>()).Returns([0x25, 0x50, 0x44, 0x46]);
         _dataverse.GetDeliveryRouteNameAsync(RouteId, Arg.Any<CancellationToken>()).Returns("Route-A");
+        _dataverse.CreateDeliveryPackAsync(RouteId, DeliveryDate, 2, "Route-A - 2026-04-07", Arg.Any<CancellationToken>()).Returns((PackId, true));
+        _mergeService.MergeDocumentsAsync(Arg.Any<string[]>(), Arg.Any<CancellationToken>()).Returns([0x25, 0x50, 0x44, 0x46]);
         _sharePoint.UploadDeliveryPackAsync("Route-A", DeliveryDate, Arg.Any<byte[]>(), Arg.Any<CancellationToken>())
             .Returns("https://sp.example.com/sites/Dev/Shared%20Documents/DeliveryPacks/Route-A/2026-04-07-delivery-pack.pdf");
 
@@ -163,7 +163,7 @@ public class GenerateDeliveryPackTests
         var ok = Assert.IsType<OkObjectResult>(result);
         AssertStatus(ok.Value, "complete");
 
-        await _dataverse.Received(1).CreateDeliveryPackAsync(RouteId, DeliveryDate, 2, Arg.Any<CancellationToken>());
+        await _dataverse.Received(1).CreateDeliveryPackAsync(RouteId, DeliveryDate, 2, "Route-A - 2026-04-07", Arg.Any<CancellationToken>());
         await _dataverse.Received(1).UpdateDeliveryPackCompleteAsync(PackId, Arg.Any<string>(), 2, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
     }
 
@@ -177,8 +177,8 @@ public class GenerateDeliveryPackTests
         _dataverse.GetDeliveryNoteUrlsAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>())
             .Returns(["https://sp.example.com/sites/Dev/Shared%20Documents/note1.pdf",
                       "https://sp.example.com/sites/Dev/Shared%20Documents/note2.pdf"]);
-        _mergeService.MergeDocumentsAsync(Arg.Any<string[]>(), Arg.Any<CancellationToken>()).Returns([0x25, 0x50, 0x44, 0x46]);
         _dataverse.GetDeliveryRouteNameAsync(RouteId, Arg.Any<CancellationToken>()).Returns("Route-A");
+        _mergeService.MergeDocumentsAsync(Arg.Any<string[]>(), Arg.Any<CancellationToken>()).Returns([0x25, 0x50, 0x44, 0x46]);
         _sharePoint.UploadDeliveryPackAsync(Arg.Any<string>(), Arg.Any<DateTimeOffset>(), Arg.Any<byte[]>(), Arg.Any<CancellationToken>())
             .Returns("https://sp.example.com/DeliveryPacks/Route-A/2026-04-07-delivery-pack.pdf");
 
@@ -188,8 +188,8 @@ public class GenerateDeliveryPackTests
         var ok = Assert.IsType<OkObjectResult>(result);
         AssertStatus(ok.Value, "complete");
 
-        await _dataverse.Received(1).SetDeliveryPackGeneratingAsync(PackId, 2, Arg.Any<CancellationToken>());
-        await _dataverse.DidNotReceive().CreateDeliveryPackAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
+        await _dataverse.Received(1).SetDeliveryPackGeneratingAsync(PackId, 2, "Route-A - 2026-04-07", Arg.Any<CancellationToken>());
+        await _dataverse.DidNotReceive().CreateDeliveryPackAsync(Arg.Any<Guid>(), Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<string?>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -198,9 +198,10 @@ public class GenerateDeliveryPackTests
         SetupNote();
         SetupCounts(orderCount: 1, noteCount: 1);
         _dataverse.GetDeliveryPackAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>()).Returns((DeliveryPackRecord?)null);
-        _dataverse.CreateDeliveryPackAsync(RouteId, DeliveryDate, 1, Arg.Any<CancellationToken>()).Returns((PackId, true));
         _dataverse.GetDeliveryNoteUrlsAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>())
             .Returns(["https://sp.example.com/sites/Dev/Shared%20Documents/note1.pdf"]);
+        _dataverse.GetDeliveryRouteNameAsync(RouteId, Arg.Any<CancellationToken>()).Returns("Route-A");
+        _dataverse.CreateDeliveryPackAsync(RouteId, DeliveryDate, 1, "Route-A - 2026-04-07", Arg.Any<CancellationToken>()).Returns((PackId, true));
         _mergeService.MergeDocumentsAsync(Arg.Any<string[]>(), Arg.Any<CancellationToken>())
             .ThrowsAsync(new HttpRequestException("Download failed"));
 

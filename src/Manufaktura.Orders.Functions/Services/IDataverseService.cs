@@ -33,12 +33,12 @@ public interface IDataverseService
     /// Creates a new delivery pack record in Generating status.
     /// Returns <c>created = false</c> when Dataverse returned 409 Conflict (concurrent creation).
     /// </summary>
-    Task<(Guid packId, bool created)> CreateDeliveryPackAsync(Guid routeId, DateTimeOffset deliveryDate, int notesCount, CancellationToken cancellationToken = default);
+    Task<(Guid packId, bool created)> CreateDeliveryPackAsync(Guid routeId, DateTimeOffset deliveryDate, int notesCount, string? packName, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Sets an existing delivery pack to Generating status and updates the expected notes count.
     /// </summary>
-    Task SetDeliveryPackGeneratingAsync(Guid packId, int notesCount, CancellationToken cancellationToken = default);
+    Task SetDeliveryPackGeneratingAsync(Guid packId, int notesCount, string? packName, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Returns the SharePoint URLs of all delivery notes for the given route and delivery date that have mb_url populated.

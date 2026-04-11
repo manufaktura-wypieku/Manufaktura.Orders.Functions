@@ -150,12 +150,13 @@ public class DataverseService : IDataverseService
         return new DeliveryPackRecord(packId, statusCode);
     }
 
-    public async Task<(Guid packId, bool created)> CreateDeliveryPackAsync(Guid routeId, DateTimeOffset deliveryDate, int notesCount, CancellationToken cancellationToken = default)
+    public async Task<(Guid packId, bool created)> CreateDeliveryPackAsync(Guid routeId, DateTimeOffset deliveryDate, int notesCount, string? packName, CancellationToken cancellationToken = default)
     {
         // OData bind syntax for lookup fields uses a special key name that contains '@'.
         // Anonymous types cannot have such property names, so we use a dictionary.
         var body = new Dictionary<string, object?>
         {
+            ["mb_name"] = packName,
             ["mb_deliverydate"] = deliveryDate.UtcDateTime,
             ["mb_statusreason"] = DeliveryPackStatus.Generating,
             ["mb_notescount"] = notesCount,
@@ -190,10 +191,11 @@ public class DataverseService : IDataverseService
         return (Guid.Parse(guidStr), true);
     }
 
-    public async Task SetDeliveryPackGeneratingAsync(Guid packId, int notesCount, CancellationToken cancellationToken = default)
+    public async Task SetDeliveryPackGeneratingAsync(Guid packId, int notesCount, string? packName, CancellationToken cancellationToken = default)
     {
         var body = new Dictionary<string, object?>
         {
+            ["mb_name"] = packName,
             ["mb_statusreason"] = DeliveryPackStatus.Generating,
             ["mb_notescount"] = notesCount
         };
@@ -248,7 +250,8 @@ public class DataverseService : IDataverseService
             return null;
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-        return doc.RootElement.TryGetProperty("mb_name", out var nameProp) ? nameProp.GetString() : null;
+        var root = doc.RootElement;
+        return root.TryGetProperty("mb_name", out var nameProp) ? nameProp.GetString() : null;
     }
 
     public async Task UpdateDeliveryPackCompleteAsync(Guid packId, string url, int mergedCount, DateTimeOffset generatedOn, CancellationToken cancellationToken = default)
