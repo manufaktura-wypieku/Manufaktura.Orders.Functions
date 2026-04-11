@@ -227,6 +227,31 @@ public class GenerateDeliveryPackTests
         AssertErrorCode(error.Value, "missing_delivery_route");
     }
 
+    [Fact]
+    public async Task FallsBackToRouteIdWhenRouteNameIsNull()
+    {
+        SetupNote();
+        SetupCounts(orderCount: 1, noteCount: 1);
+        _dataverse.GetDeliveryPackAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>()).Returns((DeliveryPackRecord?)null);
+        _dataverse.GetDeliveryNoteUrlsAsync(RouteId, DeliveryDate, Arg.Any<CancellationToken>())
+            .Returns(["https://sp.example.com/sites/Dev/Shared%20Documents/note1.pdf"]);
+        _dataverse.GetDeliveryRouteNameAsync(RouteId, Arg.Any<CancellationToken>()).Returns((string?)null);
+        var expectedName = $"{RouteId:D} - 2026-04-07";
+        _dataverse.CreateDeliveryPackAsync(RouteId, DeliveryDate, 1, expectedName, Arg.Any<CancellationToken>()).Returns((PackId, true));
+        _mergeService.MergeDocumentsAsync(Arg.Any<string[]>(), Arg.Any<CancellationToken>()).Returns([0x25, 0x50, 0x44, 0x46]);
+        _sharePoint.UploadDeliveryPackAsync(RouteId.ToString("D"), DeliveryDate, Arg.Any<byte[]>(), Arg.Any<CancellationToken>())
+            .Returns("https://sp.example.com/DeliveryPacks/fallback/2026-04-07-delivery-pack.pdf");
+
+        var request = CreateHttpRequest(new { deliveryNoteId = NoteId });
+        var result = await _function.Run(request, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        AssertStatus(ok.Value, "complete");
+
+        await _dataverse.Received(1).CreateDeliveryPackAsync(RouteId, DeliveryDate, 1, expectedName, Arg.Any<CancellationToken>());
+        await _sharePoint.Received(1).UploadDeliveryPackAsync(RouteId.ToString("D"), DeliveryDate, Arg.Any<byte[]>(), Arg.Any<CancellationToken>());
+    }
+
     // ── Helpers ─────────────────────────────────────────────────────────────
 
     private void SetupNote() =>

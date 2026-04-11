@@ -164,6 +164,24 @@ public class DataverseServiceTests
     }
 
     [Fact]
+    public async Task CreateDeliveryPack_NullPackName_OmitsMbNameFromBody()
+    {
+        var newPackId = Guid.Parse("aaaaaaaa-0001-0001-0001-000000000001");
+        var response201 = new HttpResponseMessage(HttpStatusCode.Created);
+        response201.Headers.TryAddWithoutValidation("OData-EntityId",
+            $"{DataverseUrl}/api/data/v9.2/mb_deliverypacks({newPackId:D})");
+
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(response201);
+
+        var service = CreateService(handler);
+        var (packId, created) = await service.CreateDeliveryPackAsync(Guid.NewGuid(), DateTimeOffset.UtcNow, 5, null);
+
+        Assert.True(created);
+        Assert.DoesNotContain("mb_name", handler.SentRequests[0].Body);
+    }
+
+    [Fact]
     public async Task GetDeliveryNote_ThrowsMissingDeliveryRouteException_WhenRouteValueIsEmptyString()
     {
         var noteId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
