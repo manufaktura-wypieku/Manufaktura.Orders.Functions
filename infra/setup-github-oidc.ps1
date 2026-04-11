@@ -64,7 +64,7 @@ Write-Host "    Tenant:       $TenantId"
 # Create App Registration (idempotent)
 Write-Host ''
 Write-Host "==> Looking up or creating App Registration: $AppName"
-$AppId = az ad app list --display-name $AppName --query '[0].appId' -o tsv 2>$null
+$AppId = az ad app list --filter "displayName eq '$AppName'" --query '[0].appId' -o tsv 2>$null
 if (-not $AppId) {
     $AppId = az ad app create --display-name $AppName --query appId -o tsv
     Write-Host "    Created. App (client) ID: $AppId"
@@ -172,12 +172,31 @@ $DataverseEnvs = @(
 
 if ($DataverseEnvs) {
     Write-Host ''
-    Write-Host '==> Creating Dataverse application users...'
+    Write-Host '==> Creating Dataverse application users (Function App managed identities)...'
 
     foreach ($Env in $DataverseEnvs) {
         $OrgUrl = $Env.Url.TrimEnd('/')
+        $FuncName = "func-mfk-orders-$($Env.Name)"
+        $RgName = "rg-manufaktura-orders-$($Env.Name)"
         Write-Host ''
         Write-Host "    Environment ($($Env.Name)): $OrgUrl"
+
+        # Look up the Function App's managed identity principal ID, then resolve its app (client) ID
+        $MiPrincipalId = az functionapp identity show `
+            --name $FuncName --resource-group $RgName `
+            --query 'principalId' -o tsv 2>$null
+
+        if (-not $MiPrincipalId) {
+            Write-Host "    Function App '$FuncName' not deployed yet — skipping. Re-run after deploying infrastructure."
+            continue
+        }
+
+        $MiAppId = az ad sp show --id $MiPrincipalId --query appId -o tsv 2>$null
+        if (-not $MiAppId) {
+            Write-Warning "    Could not resolve appId for managed identity $MiPrincipalId — skipping."
+            continue
+        }
+        Write-Host "    Function App managed identity (appId): $MiAppId"
 
         # Obtain an access token for this Dataverse org using the current az login
         $Token = (az account get-access-token --resource $OrgUrl | ConvertFrom-Json).accessToken
@@ -192,7 +211,7 @@ if ($DataverseEnvs) {
 
         # Check whether the application user already exists
         $ExistingUser = (Invoke-RestMethod `
-                -Uri "$OrgUrl/api/data/v9.2/systemusers?`$filter=applicationid eq $AppId&`$select=systemuserid" `
+                -Uri "$OrgUrl/api/data/v9.2/systemusers?`$filter=applicationid eq $MiAppId&`$select=systemuserid" `
                 -Headers $Headers).value
 
         if ($ExistingUser.Count -gt 0) {
@@ -206,7 +225,7 @@ if ($DataverseEnvs) {
                     -Headers $Headers).value[0].businessunitid
 
             $Body = @{
-                applicationid               = $AppId
+                applicationid               = $MiAppId
                 'businessunitid@odata.bind' = "/businessunits($RootBu)"
             } | ConvertTo-Json
 
