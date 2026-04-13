@@ -161,9 +161,9 @@ public class GenerateDeliveryPack
         // Step 7: Check for an existing delivery pack (for the concurrency guard).
         var existingPack = await _dataverse.GetDeliveryPackAsync(note.RouteId, note.DeliveryDate, cancellationToken);
 
-        if (existingPack is not null && existingPack.StatusCode == DeliveryPackStatus.Generating)
+        if (existingPack is not null && existingPack.StatusCode is DeliveryPackStatus.Generating or DeliveryPackStatus.Complete)
         {
-            _logger.LogInformation("Delivery pack {PackId} is already Generating. Exiting.", existingPack.Id);
+            _logger.LogInformation("Delivery pack {PackId} is already {Status}. Exiting.", existingPack.Id, existingPack.StatusCode);
             return new OkObjectResult(new { status = "skipped", reason = "already_generating", packId = existingPack.Id });
         }
 
