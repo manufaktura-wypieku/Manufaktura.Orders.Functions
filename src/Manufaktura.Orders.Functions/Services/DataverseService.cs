@@ -156,7 +156,7 @@ public class DataverseService : IDataverseService
         // Anonymous types cannot have such property names, so we use a dictionary.
         var body = new Dictionary<string, object?>
         {
-            ["mb_deliverydate"] = deliveryDate.UtcDateTime,
+            ["mb_deliverydate"] = deliveryDate.UtcDateTime.Date.ToString("yyyy-MM-dd"),
             ["mb_statusreason"] = DeliveryPackStatus.Generating,
             ["mb_notescount"] = notesCount,
             ["mb_deliveryroute@odata.bind"] = $"/mb_deliveryroutes({routeId:D})"
