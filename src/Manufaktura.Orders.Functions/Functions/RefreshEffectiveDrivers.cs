@@ -139,7 +139,7 @@ public class RefreshEffectiveDrivers
         {
             var resolutionRequest = await _dataverse.GetEffectiveDriverResolutionRequestForOrderAsync(orderId, cancellationToken);
             var resolution = _resolver.Resolve(resolutionRequest);
-            await _dataverse.UpdateOrderEffectiveDriverAsync(orderId, resolution, cancellationToken);
+            await _dataverse.UpdateOrderEffectiveDriverAsync(orderId, resolutionRequest.RouteId, resolution, cancellationToken);
 
             return new RefreshEffectiveDriverOrderResult(
                 orderId,

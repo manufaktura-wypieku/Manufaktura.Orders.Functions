@@ -8,6 +8,7 @@ public class EffectiveDriverResolverTests
 {
     private static readonly Guid AccountId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
     private static readonly Guid DefaultDriverId = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+    private static readonly Guid RouteId = Guid.Parse("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
     private static readonly Guid WeekdayDriverId = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
     private static readonly Guid OverrideDriverId = Guid.Parse("dddddddd-dddd-dddd-dddd-dddddddddddd");
     private static readonly DateOnly DeliveryDate = new(2026, 5, 8);
@@ -115,6 +116,7 @@ public class EffectiveDriverResolverTests
         return new EffectiveDriverResolutionRequest(
             AccountId,
             DeliveryDate,
+            RouteId,
             new RouteDriverSchedule(resolvedDefaultDriverId, weekdayDrivers),
             accountOverrides ?? [],
             driverAbsences ?? []);

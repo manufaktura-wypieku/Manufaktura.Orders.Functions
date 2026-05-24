@@ -30,6 +30,7 @@ public record RouteDriverSchedule(Guid? DefaultDriverId, IReadOnlyDictionary<Day
 public record EffectiveDriverResolutionRequest(
     Guid AccountId,
     DateOnly DeliveryDate,
+    Guid RouteId,
     RouteDriverSchedule RouteSchedule,
     IReadOnlyCollection<AccountDeliveryOverrideRecord> AccountOverrides,
     IReadOnlyCollection<DriverAbsenceRecord> DriverAbsences);

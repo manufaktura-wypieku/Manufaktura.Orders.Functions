@@ -15,9 +15,9 @@ public interface IDataverseService
     Task<IReadOnlyCollection<Guid>> GetOrderIdsForEffectiveDriverRefreshAsync(EffectiveDriverRefreshQuery query, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Persists the effective driver and source on an order.
+    /// Persists the home delivery route, effective driver, and source on an order.
     /// </summary>
-    Task UpdateOrderEffectiveDriverAsync(Guid orderId, EffectiveDriverResolutionResult resolution, CancellationToken cancellationToken = default);
+    Task UpdateOrderEffectiveDriverAsync(Guid orderId, Guid homeDeliveryRouteId, EffectiveDriverResolutionResult resolution, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Retrieves a delivery note by its ID, returning the route and delivery date.

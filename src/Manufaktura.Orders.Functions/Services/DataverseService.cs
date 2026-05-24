@@ -51,7 +51,7 @@ public class DataverseService : IDataverseService
             GetCandidateDriverIds(routeSchedule, accountOverrides),
             cancellationToken);
 
-        return new EffectiveDriverResolutionRequest(accountId, deliveryDate, routeSchedule, accountOverrides, driverAbsences);
+        return new EffectiveDriverResolutionRequest(accountId, deliveryDate, routeId, routeSchedule, accountOverrides, driverAbsences);
     }
 
     public async Task<IReadOnlyCollection<Guid>> GetOrderIdsForEffectiveDriverRefreshAsync(EffectiveDriverRefreshQuery query, CancellationToken cancellationToken = default)
@@ -113,10 +113,11 @@ public class DataverseService : IDataverseService
         return orderIds;
     }
 
-    public async Task UpdateOrderEffectiveDriverAsync(Guid orderId, EffectiveDriverResolutionResult resolution, CancellationToken cancellationToken = default)
+    public async Task UpdateOrderEffectiveDriverAsync(Guid orderId, Guid homeDeliveryRouteId, EffectiveDriverResolutionResult resolution, CancellationToken cancellationToken = default)
     {
         var body = new Dictionary<string, object?>
         {
+            ["mb_homedeliveryroute@odata.bind"] = $"/mb_deliveryroutes({homeDeliveryRouteId:D})",
             ["mb_effectivedriversource"] = resolution.Source.ToString(),
             ["mb_effectivedriver@odata.bind"] = resolution.DriverId is Guid driverId
                 ? $"/contacts({driverId:D})"

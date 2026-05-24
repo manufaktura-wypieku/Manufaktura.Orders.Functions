@@ -247,6 +247,7 @@ public class DataverseServiceTests
 
         Assert.Equal(accountId, request.AccountId);
         Assert.Equal(new DateOnly(2026, 5, 8), request.DeliveryDate);
+        Assert.Equal(routeId, request.RouteId);
         Assert.Equal(defaultDriverId, request.RouteSchedule.DefaultDriverId);
         Assert.Equal(fridayDriverId, request.RouteSchedule.GetWeekdayDriver(DayOfWeek.Friday));
 
@@ -293,6 +294,7 @@ public class DataverseServiceTests
 
         Assert.Equal(accountId, request.AccountId);
         Assert.Equal(new DateOnly(2026, 5, 8), request.DeliveryDate);
+        Assert.Equal(routeId, request.RouteId);
         Assert.Equal(4, handler.SentRequests.Count);
         Assert.Contains($"accounts({accountId:D})", handler.SentRequests[1].Url);
         Assert.Contains($"mb_deliveryroutes({routeId:D})", handler.SentRequests[2].Url);
@@ -350,16 +352,18 @@ public class DataverseServiceTests
     public async Task UpdateOrderEffectiveDriver_SetsDriverLookupAndSource()
     {
         var orderId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var routeId = Guid.Parse("33333333-3333-3333-3333-333333333333");
         var driverId = Guid.Parse("22222222-2222-2222-2222-222222222222");
         var handler = new FakeHttpMessageHandler();
         handler.Enqueue(new HttpResponseMessage(HttpStatusCode.NoContent));
 
         var service = CreateService(handler);
-        await service.UpdateOrderEffectiveDriverAsync(orderId, new EffectiveDriverResolutionResult(driverId, EffectiveDriverSource.RouteWeekday), TestContext.Current.CancellationToken);
+        await service.UpdateOrderEffectiveDriverAsync(orderId, routeId, new EffectiveDriverResolutionResult(driverId, EffectiveDriverSource.RouteWeekday), TestContext.Current.CancellationToken);
 
         Assert.Single(handler.SentRequests);
         Assert.Equal(HttpMethod.Patch, handler.SentRequests[0].Method);
         Assert.Contains($"mb_orders({orderId:D})", handler.SentRequests[0].Url);
+        Assert.Contains($"\"mb_homedeliveryroute@odata.bind\":\"/mb_deliveryroutes({routeId:D})\"", handler.SentRequests[0].Body);
         Assert.Contains("\"mb_effectivedriversource\":\"RouteWeekday\"", handler.SentRequests[0].Body);
         Assert.Contains($"\"mb_effectivedriver@odata.bind\":\"/contacts({driverId:D})\"", handler.SentRequests[0].Body);
     }
@@ -368,14 +372,16 @@ public class DataverseServiceTests
     public async Task UpdateOrderEffectiveDriver_ClearsDriverLookupWhenUncovered()
     {
         var orderId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var routeId = Guid.Parse("33333333-3333-3333-3333-333333333333");
         var handler = new FakeHttpMessageHandler();
         handler.Enqueue(new HttpResponseMessage(HttpStatusCode.NoContent));
 
         var service = CreateService(handler);
-        await service.UpdateOrderEffectiveDriverAsync(orderId, new EffectiveDriverResolutionResult(null, EffectiveDriverSource.MissingRouteDriver), TestContext.Current.CancellationToken);
+        await service.UpdateOrderEffectiveDriverAsync(orderId, routeId, new EffectiveDriverResolutionResult(null, EffectiveDriverSource.MissingRouteDriver), TestContext.Current.CancellationToken);
 
         Assert.Single(handler.SentRequests);
         Assert.Equal(HttpMethod.Patch, handler.SentRequests[0].Method);
+        Assert.Contains($"\"mb_homedeliveryroute@odata.bind\":\"/mb_deliveryroutes({routeId:D})\"", handler.SentRequests[0].Body);
         Assert.Contains("\"mb_effectivedriversource\":\"MissingRouteDriver\"", handler.SentRequests[0].Body);
         Assert.Contains("\"mb_effectivedriver@odata.bind\":null", handler.SentRequests[0].Body);
     }

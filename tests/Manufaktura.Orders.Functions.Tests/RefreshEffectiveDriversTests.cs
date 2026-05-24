@@ -62,7 +62,7 @@ public class RefreshEffectiveDriversTests
         var resolution = new EffectiveDriverResolutionResult(DriverId, EffectiveDriverSource.RouteWeekday);
         _dataverse.GetEffectiveDriverResolutionRequestForOrderAsync(OrderId, Arg.Any<CancellationToken>()).Returns(resolutionRequest);
         _resolver.Resolve(resolutionRequest).Returns(resolution);
-        _dataverse.UpdateOrderEffectiveDriverAsync(OrderId, resolution, Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _dataverse.UpdateOrderEffectiveDriverAsync(OrderId, RouteId, resolution, Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
 
         var request = CreateHttpRequest(new { orderId = OrderId });
 
@@ -80,6 +80,7 @@ public class RefreshEffectiveDriversTests
         Assert.Equal("updated", orderResult.Status);
         Assert.Equal(DriverId, orderResult.DriverId);
         Assert.Equal(nameof(EffectiveDriverSource.RouteWeekday), orderResult.Source);
+        await _dataverse.Received(1).UpdateOrderEffectiveDriverAsync(OrderId, RouteId, resolution, Arg.Any<CancellationToken>());
         await _dataverse.DidNotReceive().GetOrderIdsForEffectiveDriverRefreshAsync(Arg.Any<EffectiveDriverRefreshQuery>(), Arg.Any<CancellationToken>());
     }
 
@@ -97,8 +98,8 @@ public class RefreshEffectiveDriversTests
         _dataverse.GetEffectiveDriverResolutionRequestForOrderAsync(SecondOrderId, Arg.Any<CancellationToken>()).Returns(secondRequest);
         _resolver.Resolve(firstRequest).Returns(firstResolution);
         _resolver.Resolve(secondRequest).Returns(secondResolution);
-        _dataverse.UpdateOrderEffectiveDriverAsync(OrderId, firstResolution, Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
-        _dataverse.UpdateOrderEffectiveDriverAsync(SecondOrderId, secondResolution, Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _dataverse.UpdateOrderEffectiveDriverAsync(OrderId, RouteId, firstResolution, Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _dataverse.UpdateOrderEffectiveDriverAsync(SecondOrderId, RouteId, secondResolution, Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
 
         var request = CreateHttpRequest(new
         {
@@ -146,7 +147,7 @@ public class RefreshEffectiveDriversTests
         var orderResult = Assert.Single(response.Results);
         Assert.Equal("failed", orderResult.Status);
         Assert.Contains("no delivery route", orderResult.Error);
-        await _dataverse.DidNotReceive().UpdateOrderEffectiveDriverAsync(Arg.Any<Guid>(), Arg.Any<EffectiveDriverResolutionResult>(), Arg.Any<CancellationToken>());
+        await _dataverse.DidNotReceive().UpdateOrderEffectiveDriverAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<EffectiveDriverResolutionResult>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -160,7 +161,7 @@ public class RefreshEffectiveDriversTests
             .ThrowsAsync(new HttpRequestException("Not found", null, HttpStatusCode.NotFound));
         _dataverse.GetEffectiveDriverResolutionRequestForOrderAsync(SecondOrderId, Arg.Any<CancellationToken>()).Returns(secondRequest);
         _resolver.Resolve(secondRequest).Returns(secondResolution);
-        _dataverse.UpdateOrderEffectiveDriverAsync(SecondOrderId, secondResolution, Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _dataverse.UpdateOrderEffectiveDriverAsync(SecondOrderId, RouteId, secondResolution, Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
 
         var request = CreateHttpRequest(new { fromDate = DeliveryDate });
 
@@ -178,7 +179,7 @@ public class RefreshEffectiveDriversTests
         Assert.Contains(response.Results, orderResult =>
             orderResult.OrderId == SecondOrderId &&
             orderResult.Status == "updated");
-        await _dataverse.DidNotReceive().UpdateOrderEffectiveDriverAsync(OrderId, Arg.Any<EffectiveDriverResolutionResult>(), Arg.Any<CancellationToken>());
+        await _dataverse.DidNotReceive().UpdateOrderEffectiveDriverAsync(OrderId, Arg.Any<Guid>(), Arg.Any<EffectiveDriverResolutionResult>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]
@@ -200,6 +201,7 @@ public class RefreshEffectiveDriversTests
         => new(
             AccountId,
             DeliveryDate,
+            RouteId,
             new RouteDriverSchedule(DriverId, new Dictionary<DayOfWeek, Guid?>()),
             [],
             []);
