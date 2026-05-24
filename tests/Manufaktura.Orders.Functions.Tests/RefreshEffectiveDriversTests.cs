@@ -31,10 +31,12 @@ public class RefreshEffectiveDriversTests
         _function = new RefreshEffectiveDrivers(_dataverse, _resolver, Substitute.For<ILogger<RefreshEffectiveDrivers>>());
     }
 
-    [Fact]
-    public async Task ReturnsBadRequestWhenMaxOrdersIsInvalid()
+    [Theory]
+    [InlineData(0)]
+    [InlineData(501)]
+    public async Task ReturnsBadRequestWhenMaxOrdersIsInvalid(int maxOrders)
     {
-        var request = CreateHttpRequest(new { maxOrders = 0 });
+        var request = CreateHttpRequest(new { maxOrders });
 
         var result = await _function.Run(request, CancellationToken.None);
 
@@ -145,6 +147,38 @@ public class RefreshEffectiveDriversTests
         Assert.Equal("failed", orderResult.Status);
         Assert.Contains("no delivery route", orderResult.Error);
         await _dataverse.DidNotReceive().UpdateOrderEffectiveDriverAsync(Arg.Any<Guid>(), Arg.Any<EffectiveDriverResolutionResult>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task KeepsRefreshingWhenOneOrderIsNotFound()
+    {
+        var secondRequest = CreateResolutionRequest();
+        var secondResolution = new EffectiveDriverResolutionResult(DriverId, EffectiveDriverSource.RouteWeekday);
+        _dataverse.GetOrderIdsForEffectiveDriverRefreshAsync(Arg.Any<EffectiveDriverRefreshQuery>(), Arg.Any<CancellationToken>())
+            .Returns([OrderId, SecondOrderId]);
+        _dataverse.GetEffectiveDriverResolutionRequestForOrderAsync(OrderId, Arg.Any<CancellationToken>())
+            .ThrowsAsync(new HttpRequestException("Not found", null, HttpStatusCode.NotFound));
+        _dataverse.GetEffectiveDriverResolutionRequestForOrderAsync(SecondOrderId, Arg.Any<CancellationToken>()).Returns(secondRequest);
+        _resolver.Resolve(secondRequest).Returns(secondResolution);
+        _dataverse.UpdateOrderEffectiveDriverAsync(SecondOrderId, secondResolution, Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+
+        var request = CreateHttpRequest(new { fromDate = DeliveryDate });
+
+        var result = await _function.Run(request, CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var response = Assert.IsType<RefreshEffectiveDriversResponse>(ok.Value);
+        Assert.Equal(2, response.MatchedOrders);
+        Assert.Equal(1, response.UpdatedOrders);
+
+        Assert.Contains(response.Results, orderResult =>
+            orderResult.OrderId == OrderId &&
+            orderResult.Status == "failed" &&
+            orderResult.Error == "Order was not found in Dataverse.");
+        Assert.Contains(response.Results, orderResult =>
+            orderResult.OrderId == SecondOrderId &&
+            orderResult.Status == "updated");
+        await _dataverse.DidNotReceive().UpdateOrderEffectiveDriverAsync(OrderId, Arg.Any<EffectiveDriverResolutionResult>(), Arg.Any<CancellationToken>());
     }
 
     [Fact]

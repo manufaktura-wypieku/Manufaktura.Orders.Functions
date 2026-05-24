@@ -12,7 +12,7 @@ namespace Manufaktura.Orders.Functions.Functions;
 public class RefreshEffectiveDrivers
 {
     private const int DefaultMaxOrders = 200;
-    private const int MaximumMaxOrders = 5000;
+    private const int MaximumMaxOrders = 500;
 
     private readonly IDataverseService _dataverse;
     private readonly IEffectiveDriverResolver _resolver;
@@ -153,6 +153,11 @@ public class RefreshEffectiveDrivers
         {
             _logger.LogWarning(ex, "Cannot refresh effective driver for order {OrderId}", orderId);
             return new RefreshEffectiveDriverOrderResult(orderId, "failed", null, null, false, ex.Message);
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+        {
+            _logger.LogWarning(ex, "Order {OrderId} disappeared before its effective driver could be refreshed", orderId);
+            return new RefreshEffectiveDriverOrderResult(orderId, "failed", null, null, false, "Order was not found in Dataverse.");
         }
     }
 }

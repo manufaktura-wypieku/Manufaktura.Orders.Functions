@@ -11,6 +11,8 @@ namespace Manufaktura.Orders.Functions.Services;
 
 public class DataverseService : IDataverseService
 {
+    private const int MaximumEffectiveDriverRefreshOrders = 500;
+
     private readonly HttpClient _httpClient;
     private readonly TokenCredential _credential;
     private readonly string _dataverseUrl;
@@ -44,14 +46,17 @@ public class DataverseService : IDataverseService
 
         var routeSchedule = await GetRouteDriverScheduleAsync(routeId, cancellationToken);
         var accountOverrides = await GetAccountDeliveryOverridesAsync(accountId, deliveryDate, cancellationToken);
-        var driverAbsences = await GetDriverAbsencesAsync(deliveryDate, cancellationToken);
+        var driverAbsences = await GetDriverAbsencesAsync(
+            deliveryDate,
+            GetCandidateDriverIds(routeSchedule, accountOverrides),
+            cancellationToken);
 
         return new EffectiveDriverResolutionRequest(accountId, deliveryDate, routeSchedule, accountOverrides, driverAbsences);
     }
 
     public async Task<IReadOnlyCollection<Guid>> GetOrderIdsForEffectiveDriverRefreshAsync(EffectiveDriverRefreshQuery query, CancellationToken cancellationToken = default)
     {
-        var count = Math.Clamp(query.MaxOrders, 1, 5000);
+        var count = Math.Clamp(query.MaxOrders, 1, MaximumEffectiveDriverRefreshOrders);
         var conditions = new StringBuilder();
         conditions.AppendLine($"                  <condition attribute='mb_deliverydate' operator='on-or-after' value='{query.FromDate:yyyy-MM-dd}' />");
 
@@ -469,9 +474,15 @@ public class DataverseService : IDataverseService
         return overrides;
     }
 
-    private async Task<IReadOnlyCollection<DriverAbsenceRecord>> GetDriverAbsencesAsync(DateOnly deliveryDate, CancellationToken cancellationToken)
+    private async Task<IReadOnlyCollection<DriverAbsenceRecord>> GetDriverAbsencesAsync(DateOnly deliveryDate, IReadOnlyCollection<Guid> driverIds, CancellationToken cancellationToken)
     {
+        if (driverIds.Count == 0)
+            return [];
+
         var date = deliveryDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var driverValues = string.Join(
+            Environment.NewLine,
+            driverIds.Select(driverId => $"                    <value>{driverId:D}</value>"));
         var fetchXml =
             $"""
             <fetch>
@@ -484,6 +495,9 @@ public class DataverseService : IDataverseService
                   <condition attribute='statecode' operator='eq' value='0' />
                   <condition attribute='mb_fromdate' operator='on-or-before' value='{date}' />
                   <condition attribute='mb_todate' operator='on-or-after' value='{date}' />
+                  <condition attribute='mb_driver' operator='in'>
+            {driverValues}
+                  </condition>
                 </filter>
               </entity>
             </fetch>
@@ -507,6 +521,29 @@ public class DataverseService : IDataverseService
         }
 
         return absences;
+    }
+
+    private static Guid[] GetCandidateDriverIds(
+        RouteDriverSchedule routeSchedule,
+        IReadOnlyCollection<AccountDeliveryOverrideRecord> accountOverrides)
+    {
+        var driverIds = new HashSet<Guid>();
+
+        if (routeSchedule.DefaultDriverId is Guid defaultDriverId)
+            driverIds.Add(defaultDriverId);
+
+        foreach (var weekdayDriverId in routeSchedule.WeekdayDriverIds.Values)
+        {
+            if (weekdayDriverId is Guid driverId)
+                driverIds.Add(driverId);
+        }
+
+        foreach (var accountOverride in accountOverrides)
+        {
+            driverIds.Add(accountOverride.DriverId);
+        }
+
+        return [.. driverIds];
     }
 
     private static Guid GetRequiredLookupValue(JsonElement element, string propertyName, string message)
