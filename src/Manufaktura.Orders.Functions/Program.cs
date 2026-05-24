@@ -34,6 +34,7 @@ builder.Logging.Services.Configure<LoggerFilterOptions>(options =>
 
 builder.Services.AddSingleton<DefaultAzureCredential>();
 builder.Services.AddSingleton<TokenCredential>(sp => sp.GetRequiredService<DefaultAzureCredential>());
+builder.Services.AddSingleton<IEffectiveDriverResolver, EffectiveDriverResolver>();
 builder.Services.AddHttpClient<IDocumentMergeService, DocumentMergeService>();
 builder.Services.AddHttpClient<IDataverseService, DataverseService>();
 builder.Services.AddHttpClient<ISharePointService, SharePointService>();

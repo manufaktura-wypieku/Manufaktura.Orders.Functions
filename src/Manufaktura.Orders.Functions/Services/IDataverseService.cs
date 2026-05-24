@@ -5,6 +5,21 @@ namespace Manufaktura.Orders.Functions.Services;
 public interface IDataverseService
 {
     /// <summary>
+    /// Loads the order, route rota, account overrides, and driver absences needed to resolve an order's effective driver.
+    /// </summary>
+    Task<EffectiveDriverResolutionRequest> GetEffectiveDriverResolutionRequestForOrderAsync(Guid orderId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Finds current or future orders whose effective driver should be recalculated.
+    /// </summary>
+    Task<IReadOnlyCollection<Guid>> GetOrderIdsForEffectiveDriverRefreshAsync(EffectiveDriverRefreshQuery query, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Persists the effective driver and source on an order.
+    /// </summary>
+    Task UpdateOrderEffectiveDriverAsync(Guid orderId, EffectiveDriverResolutionResult resolution, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Retrieves a delivery note by its ID, returning the route and delivery date.
     /// </summary>
     Task<DeliveryNoteRecord> GetDeliveryNoteAsync(Guid id, CancellationToken cancellationToken = default);

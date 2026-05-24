@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
+using System.Globalization;
 using Azure.Core;
 using Manufaktura.Orders.Functions.Models;
 using Microsoft.Extensions.Configuration;
@@ -25,6 +26,101 @@ public class DataverseService : IDataverseService
             ?? throw new InvalidOperationException("DataverseUrl configuration is required."))
             .TrimEnd('/');
         _scopes = [_dataverseUrl + "/.default"];
+    }
+
+    public async Task<EffectiveDriverResolutionRequest> GetEffectiveDriverResolutionRequestForOrderAsync(Guid orderId, CancellationToken cancellationToken = default)
+    {
+        var orderUrl = $"{_dataverseUrl}/api/data/v9.2/mb_orders({orderId:D})?$select=mb_deliverydate,_mb_customer_value,_mb_homedeliveryroute_value";
+        using var orderResponse = await SendAsync(HttpMethod.Get, orderUrl, body: null, cancellationToken);
+        orderResponse.EnsureSuccessStatusCode();
+
+        using var orderDoc = await JsonDocument.ParseAsync(await orderResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        var order = orderDoc.RootElement;
+        var accountId = GetRequiredLookupValue(order, "_mb_customer_value", $"Order '{orderId:D}' has no customer assigned.");
+        var deliveryDate = GetRequiredDateOnly(order, "mb_deliverydate", $"Order '{orderId:D}' has no delivery date assigned.");
+        var routeId = GetLookupValue(order, "_mb_homedeliveryroute_value")
+            ?? await GetAccountHomeDeliveryRouteAsync(accountId, cancellationToken)
+            ?? throw new InvalidOperationException($"Order '{orderId:D}' and account '{accountId:D}' have no home delivery route assigned.");
+
+        var routeSchedule = await GetRouteDriverScheduleAsync(routeId, cancellationToken);
+        var accountOverrides = await GetAccountDeliveryOverridesAsync(accountId, deliveryDate, cancellationToken);
+        var driverAbsences = await GetDriverAbsencesAsync(deliveryDate, cancellationToken);
+
+        return new EffectiveDriverResolutionRequest(accountId, deliveryDate, routeSchedule, accountOverrides, driverAbsences);
+    }
+
+    public async Task<IReadOnlyCollection<Guid>> GetOrderIdsForEffectiveDriverRefreshAsync(EffectiveDriverRefreshQuery query, CancellationToken cancellationToken = default)
+    {
+        var count = Math.Clamp(query.MaxOrders, 1, 5000);
+        var conditions = new StringBuilder();
+        conditions.AppendLine($"                  <condition attribute='mb_deliverydate' operator='on-or-after' value='{query.FromDate:yyyy-MM-dd}' />");
+
+        if (query.ToDate is not null)
+            conditions.AppendLine($"                  <condition attribute='mb_deliverydate' operator='on-or-before' value='{query.ToDate:yyyy-MM-dd}' />");
+
+        if (query.AccountId is not null)
+            conditions.AppendLine($"                  <condition attribute='mb_customer' operator='eq' value='{query.AccountId.Value:D}' />");
+
+        if (query.RouteId is not null)
+            conditions.AppendLine($"                  <condition attribute='mb_homedeliveryroute' operator='eq' value='{query.RouteId.Value:D}' />");
+
+        if (query.DriverId is not null)
+            conditions.AppendLine($"                  <condition attribute='mb_effectivedriver' operator='eq' value='{query.DriverId.Value:D}' />");
+
+        var fetchXml =
+            $"""
+            <fetch count='{count}'>
+              <entity name='mb_order'>
+                <attribute name='mb_orderid' />
+                <order attribute='mb_deliverydate' descending='false' />
+                <filter type='and'>
+            {conditions}                </filter>
+              </entity>
+            </fetch>
+            """;
+
+        var nextUrl = (string?)$"{_dataverseUrl}/api/data/v9.2/mb_orders?fetchXml={Uri.EscapeDataString(fetchXml)}";
+        var orderIds = new List<Guid>();
+
+        while (!string.IsNullOrWhiteSpace(nextUrl) && orderIds.Count < count)
+        {
+            using var response = await SendAsync(HttpMethod.Get, nextUrl, body: null, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+            if (doc.RootElement.TryGetProperty("value", out var values))
+            {
+                foreach (var row in values.EnumerateArray())
+                {
+                    if (row.TryGetProperty("mb_orderid", out var idProperty) && Guid.TryParse(idProperty.GetString(), out var orderId))
+                        orderIds.Add(orderId);
+
+                    if (orderIds.Count == count)
+                        break;
+                }
+            }
+
+            nextUrl = doc.RootElement.TryGetProperty("@odata.nextLink", out var nextLinkProp)
+                ? nextLinkProp.GetString()
+                : null;
+        }
+
+        return orderIds;
+    }
+
+    public async Task UpdateOrderEffectiveDriverAsync(Guid orderId, EffectiveDriverResolutionResult resolution, CancellationToken cancellationToken = default)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["mb_effectivedriversource"] = resolution.Source.ToString(),
+            ["mb_effectivedriver@odata.bind"] = resolution.DriverId is Guid driverId
+                ? $"/contacts({driverId:D})"
+                : null
+        };
+
+        var url = $"{_dataverseUrl}/api/data/v9.2/mb_orders({orderId:D})";
+        using var response = await SendAsync(HttpMethod.Patch, url, body, cancellationToken);
+        response.EnsureSuccessStatusCode();
     }
 
     public async Task<DeliveryNoteRecord> GetDeliveryNoteAsync(Guid id, CancellationToken cancellationToken = default)
@@ -297,6 +393,149 @@ public class DataverseService : IDataverseService
         }
     }
 
+    private async Task<Guid?> GetAccountHomeDeliveryRouteAsync(Guid accountId, CancellationToken cancellationToken)
+    {
+        var url = $"{_dataverseUrl}/api/data/v9.2/accounts({accountId:D})?$select=_mb_deliveryroute_value";
+        using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        return GetLookupValue(doc.RootElement, "_mb_deliveryroute_value");
+    }
+
+    private async Task<RouteDriverSchedule> GetRouteDriverScheduleAsync(Guid routeId, CancellationToken cancellationToken)
+    {
+        const string select = "_mb_driver_value,_mb_drivermonday_value,_mb_drivertuesday_value,_mb_driverwednesday_value,_mb_driverthursday_value,_mb_driverfriday_value,_mb_driversaturday_value,_mb_driversunday_value";
+        var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliveryroutes({routeId:D})?$select={select}";
+        using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        var route = doc.RootElement;
+
+        var weekdayDriverIds = new Dictionary<DayOfWeek, Guid?>
+        {
+            [DayOfWeek.Monday] = GetLookupValue(route, "_mb_drivermonday_value"),
+            [DayOfWeek.Tuesday] = GetLookupValue(route, "_mb_drivertuesday_value"),
+            [DayOfWeek.Wednesday] = GetLookupValue(route, "_mb_driverwednesday_value"),
+            [DayOfWeek.Thursday] = GetLookupValue(route, "_mb_driverthursday_value"),
+            [DayOfWeek.Friday] = GetLookupValue(route, "_mb_driverfriday_value"),
+            [DayOfWeek.Saturday] = GetLookupValue(route, "_mb_driversaturday_value"),
+            [DayOfWeek.Sunday] = GetLookupValue(route, "_mb_driversunday_value")
+        };
+
+        return new RouteDriverSchedule(GetLookupValue(route, "_mb_driver_value"), weekdayDriverIds);
+    }
+
+    private async Task<IReadOnlyCollection<AccountDeliveryOverrideRecord>> GetAccountDeliveryOverridesAsync(Guid accountId, DateOnly deliveryDate, CancellationToken cancellationToken)
+    {
+        var date = deliveryDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var fetchXml =
+            $"""
+            <fetch>
+              <entity name='mb_accountdeliveryoverride'>
+                <attribute name='mb_accountdeliveryoverrideid' />
+                <attribute name='mb_account' />
+                <attribute name='mb_driver' />
+                <attribute name='mb_fromdate' />
+                <attribute name='mb_todate' />
+                <filter type='and'>
+                  <condition attribute='statecode' operator='eq' value='0' />
+                  <condition attribute='mb_account' operator='eq' value='{accountId:D}' />
+                  <condition attribute='mb_fromdate' operator='on-or-before' value='{date}' />
+                  <condition attribute='mb_todate' operator='on-or-after' value='{date}' />
+                </filter>
+              </entity>
+            </fetch>
+            """;
+
+        var url = $"{_dataverseUrl}/api/data/v9.2/mb_accountdeliveryoverrides?fetchXml={Uri.EscapeDataString(fetchXml)}";
+        using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        if (!doc.RootElement.TryGetProperty("value", out var values))
+            return [];
+
+        var overrides = new List<AccountDeliveryOverrideRecord>();
+        foreach (var row in values.EnumerateArray())
+        {
+            var driverId = GetRequiredLookupValue(row, "_mb_driver_value", "Account delivery override has no driver assigned.");
+            var fromDate = GetRequiredDateOnly(row, "mb_fromdate", "Account delivery override has no from date.");
+            var toDate = GetRequiredDateOnly(row, "mb_todate", "Account delivery override has no to date.");
+            overrides.Add(new AccountDeliveryOverrideRecord(accountId, fromDate, toDate, driverId));
+        }
+
+        return overrides;
+    }
+
+    private async Task<IReadOnlyCollection<DriverAbsenceRecord>> GetDriverAbsencesAsync(DateOnly deliveryDate, CancellationToken cancellationToken)
+    {
+        var date = deliveryDate.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture);
+        var fetchXml =
+            $"""
+            <fetch>
+              <entity name='mb_driverabsence'>
+                <attribute name='mb_driverabsenceid' />
+                <attribute name='mb_driver' />
+                <attribute name='mb_fromdate' />
+                <attribute name='mb_todate' />
+                <filter type='and'>
+                  <condition attribute='statecode' operator='eq' value='0' />
+                  <condition attribute='mb_fromdate' operator='on-or-before' value='{date}' />
+                  <condition attribute='mb_todate' operator='on-or-after' value='{date}' />
+                </filter>
+              </entity>
+            </fetch>
+            """;
+
+        var url = $"{_dataverseUrl}/api/data/v9.2/mb_driverabsences?fetchXml={Uri.EscapeDataString(fetchXml)}";
+        using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
+        response.EnsureSuccessStatusCode();
+
+        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        if (!doc.RootElement.TryGetProperty("value", out var values))
+            return [];
+
+        var absences = new List<DriverAbsenceRecord>();
+        foreach (var row in values.EnumerateArray())
+        {
+            var driverId = GetRequiredLookupValue(row, "_mb_driver_value", "Driver absence has no driver assigned.");
+            var fromDate = GetRequiredDateOnly(row, "mb_fromdate", "Driver absence has no from date.");
+            var toDate = GetRequiredDateOnly(row, "mb_todate", "Driver absence has no to date.");
+            absences.Add(new DriverAbsenceRecord(driverId, fromDate, toDate));
+        }
+
+        return absences;
+    }
+
+    private static Guid GetRequiredLookupValue(JsonElement element, string propertyName, string message)
+        => GetLookupValue(element, propertyName) ?? throw new InvalidOperationException(message);
+
+    private static Guid? GetLookupValue(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.String)
+            return null;
+
+        return Guid.TryParse(property.GetString(), out var id) ? id : null;
+    }
+
+    private static DateOnly GetRequiredDateOnly(JsonElement element, string propertyName, string message)
+    {
+        if (!element.TryGetProperty(propertyName, out var property))
+            throw new InvalidOperationException(message);
+
+        var value = property.GetString();
+        if (string.IsNullOrWhiteSpace(value))
+            throw new InvalidOperationException(message);
+
+        if (DateOnly.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+            return date;
+
+        var dateTime = property.GetDateTimeOffset();
+        return DateOnly.FromDateTime(dateTime.UtcDateTime);
+    }
+
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string url, object? body, CancellationToken cancellationToken)
     {
         var token = await _credential.GetTokenAsync(new TokenRequestContext(_scopes), cancellationToken);
@@ -320,9 +559,19 @@ public class DataverseService : IDataverseService
             var errorBody = response.Content is not null
                 ? await response.Content.ReadAsStringAsync(cancellationToken)
                 : string.Empty;
-            _logger.LogError(
-                "Dataverse returned {StatusCode} for {Method} {Url}. Response body: {Body}",
-                (int)response.StatusCode, method.Method, url, errorBody);
+
+            if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+            {
+                _logger.LogWarning(
+                    "Dataverse returned {StatusCode} for {Method} {Url}. Response body: {Body}",
+                    (int)response.StatusCode, method.Method, url, errorBody);
+            }
+            else
+            {
+                _logger.LogError(
+                    "Dataverse returned {StatusCode} for {Method} {Url}. Response body: {Body}",
+                    (int)response.StatusCode, method.Method, url, errorBody);
+            }
         }
 
         return response;

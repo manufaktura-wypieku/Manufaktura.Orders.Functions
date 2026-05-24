@@ -135,8 +135,8 @@ public class DataverseServiceTests
         var existingPackId = Guid.Parse("bbbbbbbb-0002-0002-0002-000000000002");
 
         var handler = new FakeHttpMessageHandler();
-        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.Conflict)); // POST → 409
-        handler.Enqueue(OkJson($$"""{"value":[{"mb_deliverypackid":"{{existingPackId:D}}","mb_statusreason":1}]}""")); // GET re-query → 200
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.Conflict)); // POST -> 409
+        handler.Enqueue(OkJson($$"""{"value":[{"mb_deliverypackid":"{{existingPackId:D}}","mb_statusreason":1}]}""")); // GET re-query -> 200
 
         var service = CreateService(handler);
         var (packId, created) = await service.CreateDeliveryPackAsync(Guid.NewGuid(), DateTimeOffset.UtcNow, 5, "Test Pack");
@@ -193,5 +193,186 @@ public class DataverseServiceTests
 
         Assert.Equal(noteId, ex.DeliveryNoteId);
         Assert.Contains("has no delivery route assigned", ex.Message);
+    }
+
+    [Fact]
+    public async Task GetEffectiveDriverResolutionRequestForOrder_LoadsOrderRouteOverridesAndAbsences()
+    {
+        var orderId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var accountId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var routeId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var defaultDriverId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        var fridayDriverId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+        var overrideDriverId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        var absentDriverId = Guid.Parse("77777777-7777-7777-7777-777777777777");
+
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(OkJson($$"""
+        {
+          "_mb_customer_value":"{{accountId:D}}",
+          "_mb_homedeliveryroute_value":"{{routeId:D}}",
+          "mb_deliverydate":"2026-05-08"
+        }
+        """));
+        handler.Enqueue(OkJson($$"""
+        {
+          "_mb_driver_value":"{{defaultDriverId:D}}",
+          "_mb_driverfriday_value":"{{fridayDriverId:D}}"
+        }
+        """));
+        handler.Enqueue(OkJson($$"""
+        {
+          "value":[
+            {
+              "_mb_driver_value":"{{overrideDriverId:D}}",
+              "mb_fromdate":"2026-05-08",
+              "mb_todate":"2026-05-15"
+            }
+          ]
+        }
+        """));
+        handler.Enqueue(OkJson($$"""
+        {
+          "value":[
+            {
+              "_mb_driver_value":"{{absentDriverId:D}}",
+              "mb_fromdate":"2026-05-01",
+              "mb_todate":"2026-05-10"
+            }
+          ]
+        }
+        """));
+
+        var service = CreateService(handler);
+        var request = await service.GetEffectiveDriverResolutionRequestForOrderAsync(orderId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(accountId, request.AccountId);
+        Assert.Equal(new DateOnly(2026, 5, 8), request.DeliveryDate);
+        Assert.Equal(defaultDriverId, request.RouteSchedule.DefaultDriverId);
+        Assert.Equal(fridayDriverId, request.RouteSchedule.GetWeekdayDriver(DayOfWeek.Friday));
+
+        var accountOverride = Assert.Single(request.AccountOverrides);
+        Assert.Equal(accountId, accountOverride.AccountId);
+        Assert.Equal(overrideDriverId, accountOverride.DriverId);
+
+        var absence = Assert.Single(request.DriverAbsences);
+        Assert.Equal(absentDriverId, absence.DriverId);
+
+        Assert.Equal(4, handler.SentRequests.Count);
+        Assert.Contains($"mb_orders({orderId:D})", handler.SentRequests[0].Url);
+        Assert.Contains($"mb_deliveryroutes({routeId:D})", handler.SentRequests[1].Url);
+        Assert.Contains("mb_accountdeliveryoverrides", handler.SentRequests[2].Url);
+        Assert.Contains("mb_driverabsences", handler.SentRequests[3].Url);
+    }
+
+    [Fact]
+    public async Task GetEffectiveDriverResolutionRequestForOrder_FallsBackToAccountRouteWhenOrderHomeRouteIsBlank()
+    {
+        var orderId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var accountId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var routeId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(OkJson($$"""
+        {
+          "_mb_customer_value":"{{accountId:D}}",
+          "_mb_homedeliveryroute_value":null,
+          "mb_deliverydate":"2026-05-08"
+        }
+        """));
+        handler.Enqueue(OkJson($$"""{"_mb_deliveryroute_value":"{{routeId:D}}"}"""));
+        handler.Enqueue(OkJson("""{"_mb_driver_value":null}"""));
+        handler.Enqueue(OkJson("""{"value":[]}"""));
+        handler.Enqueue(OkJson("""{"value":[]}"""));
+
+        var service = CreateService(handler);
+        var request = await service.GetEffectiveDriverResolutionRequestForOrderAsync(orderId, TestContext.Current.CancellationToken);
+
+        Assert.Equal(accountId, request.AccountId);
+        Assert.Equal(new DateOnly(2026, 5, 8), request.DeliveryDate);
+        Assert.Equal(5, handler.SentRequests.Count);
+        Assert.Contains($"accounts({accountId:D})", handler.SentRequests[1].Url);
+        Assert.Contains($"mb_deliveryroutes({routeId:D})", handler.SentRequests[2].Url);
+    }
+
+    [Fact]
+    public async Task GetOrderIdsForEffectiveDriverRefresh_EmbedsFiltersAndFollowsNextLink()
+    {
+        var accountId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var routeId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var driverId = Guid.Parse("44444444-4444-4444-4444-444444444444");
+        var firstOrderId = Guid.Parse("55555555-5555-5555-5555-555555555555");
+        var secondOrderId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(OkJson($$"""
+        {
+          "value":[{"mb_orderid":"{{firstOrderId:D}}"}],
+          "@odata.nextLink":"{{DataverseUrl}}/api/data/v9.2/mb_orders?$skiptoken=page2"
+        }
+        """));
+        handler.Enqueue(OkJson($$"""
+        {
+          "value":[{"mb_orderid":"{{secondOrderId:D}}"}]
+        }
+        """));
+
+        var service = CreateService(handler);
+        var query = new EffectiveDriverRefreshQuery(
+            new DateOnly(2026, 5, 8),
+            new DateOnly(2026, 5, 12),
+            accountId,
+            routeId,
+            driverId,
+            50);
+
+        var orderIds = await service.GetOrderIdsForEffectiveDriverRefreshAsync(query, TestContext.Current.CancellationToken);
+
+        Assert.Equal([firstOrderId, secondOrderId], orderIds);
+        Assert.Equal(2, handler.SentRequests.Count);
+
+        var decodedUrl = Uri.UnescapeDataString(handler.SentRequests[0].Url);
+        Assert.Contains("<fetch count='50'>", decodedUrl);
+        Assert.Contains("attribute='mb_deliverydate' operator='on-or-after' value='2026-05-08'", decodedUrl);
+        Assert.Contains("attribute='mb_deliverydate' operator='on-or-before' value='2026-05-12'", decodedUrl);
+        Assert.Contains($"attribute='mb_customer' operator='eq' value='{accountId:D}'", decodedUrl);
+        Assert.Contains($"attribute='mb_homedeliveryroute' operator='eq' value='{routeId:D}'", decodedUrl);
+        Assert.Contains($"attribute='mb_effectivedriver' operator='eq' value='{driverId:D}'", decodedUrl);
+        Assert.Equal(HttpMethod.Get, handler.SentRequests[1].Method);
+        Assert.Contains("skiptoken=page2", handler.SentRequests[1].Url);
+    }
+
+    [Fact]
+    public async Task UpdateOrderEffectiveDriver_SetsDriverLookupAndSource()
+    {
+        var orderId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var driverId = Guid.Parse("22222222-2222-2222-2222-222222222222");
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.NoContent));
+
+        var service = CreateService(handler);
+        await service.UpdateOrderEffectiveDriverAsync(orderId, new EffectiveDriverResolutionResult(driverId, EffectiveDriverSource.RouteWeekday), TestContext.Current.CancellationToken);
+
+        Assert.Single(handler.SentRequests);
+        Assert.Equal(HttpMethod.Patch, handler.SentRequests[0].Method);
+        Assert.Contains($"mb_orders({orderId:D})", handler.SentRequests[0].Url);
+        Assert.Contains("\"mb_effectivedriversource\":\"RouteWeekday\"", handler.SentRequests[0].Body);
+        Assert.Contains($"\"mb_effectivedriver@odata.bind\":\"/contacts({driverId:D})\"", handler.SentRequests[0].Body);
+    }
+
+    [Fact]
+    public async Task UpdateOrderEffectiveDriver_ClearsDriverLookupWhenUncovered()
+    {
+        var orderId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.NoContent));
+
+        var service = CreateService(handler);
+        await service.UpdateOrderEffectiveDriverAsync(orderId, new EffectiveDriverResolutionResult(null, EffectiveDriverSource.MissingRouteDriver), TestContext.Current.CancellationToken);
+
+        Assert.Single(handler.SentRequests);
+        Assert.Equal(HttpMethod.Patch, handler.SentRequests[0].Method);
+        Assert.Contains("\"mb_effectivedriversource\":\"MissingRouteDriver\"", handler.SentRequests[0].Body);
+        Assert.Contains("\"mb_effectivedriver@odata.bind\":null", handler.SentRequests[0].Body);
     }
 }
