@@ -119,10 +119,41 @@ jobs:
         run: |
           set -euo pipefail
 
-          az functionapp deployment source config-zip \
+          set +e
+          deploy_output=$(az functionapp deployment source config-zip \
             --resource-group "${{ env.DEV_RESOURCE_GROUP }}" \
             --name "${{ steps.deploy_infra.outputs.function_app_name }}" \
-            --src "${{ env.FUNCTION_PACKAGE_PATH }}"
+            --src "${{ env.FUNCTION_PACKAGE_PATH }}" 2>&1)
+          deploy_exit=$?
+          set -e
+
+          echo "$deploy_output"
+          if [[ "$deploy_exit" -ne 0 && "$deploy_output" != *"Deployment was partially successful"* ]]; then
+            exit "$deploy_exit"
+          fi
+
+          if [[ "$deploy_exit" -ne 0 ]]; then
+            echo "::warning::Azure Functions Flex Consumption reported a partial deployment. Verifying synced functions before smoke testing."
+          fi
+
+          unzip -p "${{ env.FUNCTION_PACKAGE_PATH }}" functions.metadata \
+            | jq -r '.[].name' \
+            | sort > "${RUNNER_TEMP}/expected-functions.txt"
+
+          az functionapp function list \
+            --resource-group "${{ env.DEV_RESOURCE_GROUP }}" \
+            --name "${{ steps.deploy_infra.outputs.function_app_name }}" \
+            --query "[].name" \
+            --output tsv \
+            | sed 's#.*/##' \
+            | sort > "${RUNNER_TEMP}/actual-functions.txt"
+
+          missing_functions=$(comm -23 "${RUNNER_TEMP}/expected-functions.txt" "${RUNNER_TEMP}/actual-functions.txt")
+          if [[ -n "$missing_functions" ]]; then
+            echo "Deployment did not sync all expected functions:" >&2
+            echo "$missing_functions" >&2
+            exit 1
+          fi
 
       - name: Smoke test deployed function
         shell: bash
