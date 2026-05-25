@@ -131,111 +131,60 @@ public class DataverseService : IDataverseService
 
     public async Task<DeliveryNoteRecord> GetDeliveryNoteAsync(Guid id, CancellationToken cancellationToken = default)
     {
-        var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes({id:D})?$select=mb_deliverydate,_mb_deliveryroute_value";
-        using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
+        var noteUrl = $"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes({id:D})?$select=_mb_order_value";
+        using var response = await SendAsync(HttpMethod.Get, noteUrl, body: null, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
         var root = doc.RootElement;
+        var orderId = GetLookupValue(root, "_mb_order_value")
+            ?? throw MissingDeliveryPackGroupingException.MissingOrder(id);
 
-        var routeIdStr = root.GetProperty("_mb_deliveryroute_value").GetString();
-        if (string.IsNullOrEmpty(routeIdStr))
-            throw new MissingDeliveryRouteException(id);
-        var routeId = Guid.Parse(routeIdStr);
-        var deliveryDate = root.GetProperty("mb_deliverydate").GetDateTimeOffset();
+        var orderUrl = $"{_dataverseUrl}/api/data/v9.2/mb_orders({orderId:D})?$select=mb_deliverydate,_mb_effectivedriver_value";
+        using var orderResponse = await SendAsync(HttpMethod.Get, orderUrl, body: null, cancellationToken);
+        orderResponse.EnsureSuccessStatusCode();
 
-        return new DeliveryNoteRecord(id, routeId, deliveryDate);
+        using var orderDoc = await JsonDocument.ParseAsync(await orderResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        var order = orderDoc.RootElement;
+        var effectiveDriverId = GetLookupValue(order, "_mb_effectivedriver_value")
+            ?? throw MissingDeliveryPackGroupingException.MissingEffectiveDriver(id, orderId);
+        var deliveryDate = GetDeliveryDateForPack(order, "mb_deliverydate", id, orderId);
+
+        return new DeliveryNoteRecord(id, orderId, effectiveDriverId, deliveryDate);
     }
 
-    public async Task<int> CountCompletedOrdersByRouteAndDateAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default)
+    public async Task<int> CountTotalDeliveryNotesForDriverAndDateAsync(Guid effectiveDriverId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default)
     {
-        // Use FetchXML with a link-entity join to filter orders by the account's delivery route,
-        // avoiding URL-length issues from expanding all account IDs into an OData OR filter.
-        var utcDeliveryDate = deliveryDate.UtcDateTime.Date;
-        var dateFrom = utcDeliveryDate.ToString("yyyy-MM-dd");
-        var dateTo = utcDeliveryDate.AddDays(1).ToString("yyyy-MM-dd");
-
-        var fetchXml =
-            $"""
-            <fetch aggregate='true'>
-              <entity name='mb_order'>
-                <attribute name='mb_orderid' alias='ordercount' aggregate='count' />
-                <filter type='and'>
-                  <condition attribute='statecode' operator='eq' value='1' />
-                  <condition attribute='mb_deliverydate' operator='on-or-after' value='{dateFrom}' />
-                  <condition attribute='mb_deliverydate' operator='lt' value='{dateTo}' />
-                </filter>
-                <link-entity name='account' from='accountid' to='mb_customer' link-type='inner'>
-                  <filter type='and'>
-                    <condition attribute='mb_deliveryroute' operator='eq' value='{routeId:D}' />
-                  </filter>
-                </link-entity>
-              </entity>
-            </fetch>
-            """;
-
-        var url = $"{_dataverseUrl}/api/data/v9.2/mb_orders?fetchXml={Uri.EscapeDataString(fetchXml)}";
+        var fetchXml = BuildDeliveryNotesForDriverAndDateCountFetchXml(effectiveDriverId, deliveryDate, requireUrl: false);
+        var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes?fetchXml={Uri.EscapeDataString(fetchXml)}";
         using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-        if (!doc.RootElement.TryGetProperty("value", out var valueProp) || valueProp.GetArrayLength() == 0)
-            return 0;
-
-        var firstRow = valueProp[0];
-        if (!firstRow.TryGetProperty("ordercount", out var countProp))
-            return 0;
-
-        return countProp.ValueKind switch
-        {
-            JsonValueKind.Number => countProp.GetInt32(),
-            JsonValueKind.String when int.TryParse(countProp.GetString(), out var count) => count,
-            _ => 0
-        };
+        return GetAggregateCount(doc.RootElement, "notecount");
     }
 
-    public async Task<int> CountTotalDeliveryNotesAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default)
+    public async Task<int> CountDeliveryNotesWithUrlForDriverAndDateAsync(Guid effectiveDriverId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default)
     {
-        var dateFrom = deliveryDate.UtcDateTime.Date.ToString("yyyy-MM-dd");
-        var dateTo = deliveryDate.UtcDateTime.Date.AddDays(1).ToString("yyyy-MM-dd");
-
-        var filter = $"_mb_deliveryroute_value eq {routeId:D}" +
-                     $" and mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z";
-
-        var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes?$filter={Uri.EscapeDataString(filter)}&$count=true&$select=mb_deliverynoteid&$top=1";
+        var fetchXml = BuildDeliveryNotesForDriverAndDateCountFetchXml(effectiveDriverId, deliveryDate, requireUrl: true);
+        var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes?fetchXml={Uri.EscapeDataString(fetchXml)}";
         using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
         response.EnsureSuccessStatusCode();
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-        return doc.RootElement.TryGetProperty("@odata.count", out var countProp) ? countProp.GetInt32() : 0;
+        return GetAggregateCount(doc.RootElement, "notecount");
     }
 
-    public async Task<int> CountDeliveryNotesWithUrlAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default)
+    public async Task<DeliveryPackRecord?> GetActiveDeliveryPackAsync(Guid effectiveDriverId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default)
     {
         var dateFrom = deliveryDate.UtcDateTime.Date.ToString("yyyy-MM-dd");
         var dateTo = deliveryDate.UtcDateTime.Date.AddDays(1).ToString("yyyy-MM-dd");
 
-        var filter = $"_mb_deliveryroute_value eq {routeId:D}" +
+        var filter = $"_mb_effectivedriver_value eq {effectiveDriverId:D}" +
                      $" and mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z" +
-                     $" and mb_url ne null and mb_url ne ''";
+                     " and statecode eq 0";
 
-        var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes?$filter={Uri.EscapeDataString(filter)}&$count=true&$select=mb_deliverynoteid&$top=1";
-        using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
-        response.EnsureSuccessStatusCode();
-
-        using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-        return doc.RootElement.TryGetProperty("@odata.count", out var countProp) ? countProp.GetInt32() : 0;
-    }
-
-    public async Task<DeliveryPackRecord?> GetDeliveryPackAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default)
-    {
-        var dateFrom = deliveryDate.UtcDateTime.Date.ToString("yyyy-MM-dd");
-        var dateTo = deliveryDate.UtcDateTime.Date.AddDays(1).ToString("yyyy-MM-dd");
-
-        var filter = $"_mb_deliveryroute_value eq {routeId:D}" +
-                     $" and mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z";
-
-        var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverypacks?$filter={Uri.EscapeDataString(filter)}&$select=mb_deliverypackid,mb_statusreason&$top=1";
+        var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliverypacks?$filter={Uri.EscapeDataString(filter)}&$select=mb_deliverypackid,mb_statusreason&$orderby=createdon desc&$top=1";
         using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
         response.EnsureSuccessStatusCode();
 
@@ -252,7 +201,7 @@ public class DataverseService : IDataverseService
         return new DeliveryPackRecord(packId, statusCode);
     }
 
-    public async Task<(Guid packId, bool created)> CreateDeliveryPackAsync(Guid routeId, DateTimeOffset deliveryDate, int notesCount, string? packName, CancellationToken cancellationToken = default)
+    public async Task<(Guid packId, bool created)> CreateDeliveryPackAsync(Guid effectiveDriverId, DateTimeOffset deliveryDate, int notesCount, string? packName, CancellationToken cancellationToken = default)
     {
         // OData bind syntax for lookup fields uses a special key name that contains '@'.
         // Anonymous types cannot have such property names, so we use a dictionary.
@@ -261,7 +210,7 @@ public class DataverseService : IDataverseService
             ["mb_deliverydate"] = deliveryDate.UtcDateTime.Date.ToString("yyyy-MM-dd"),
             ["mb_statusreason"] = DeliveryPackStatus.Generating,
             ["mb_notescount"] = notesCount,
-            ["mb_deliveryroute@odata.bind"] = $"/mb_deliveryroutes({routeId:D})"
+            ["mb_effectivedriver@odata.bind"] = $"/contacts({effectiveDriverId:D})"
         };
         if (!string.IsNullOrWhiteSpace(packName))
             body["mb_name"] = packName;
@@ -270,13 +219,10 @@ public class DataverseService : IDataverseService
         using var response = await SendAsync(HttpMethod.Post, url, body, cancellationToken);
 
         // 409 Conflict: a concurrent request already created the pack; re-query and return its ID.
-        // NOTE: this guard only prevents duplicates when Dataverse enforces a uniqueness alternate key
-        // for (mb_deliveryroute, mb_deliverydate). Ensure that alternate key is configured in the
-        // solution before deploying to production.
         if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
         {
-            var existing = await GetDeliveryPackAsync(routeId, deliveryDate, cancellationToken)
-                ?? throw new InvalidOperationException("Dataverse returned 409 Conflict but no delivery pack was found for the route/date.");
+            var existing = await GetActiveDeliveryPackAsync(effectiveDriverId, deliveryDate, cancellationToken)
+                ?? throw new InvalidOperationException("Dataverse returned 409 Conflict but no active delivery pack was found for the effective driver/date.");
             return (existing.Id, false);
         }
 
@@ -299,7 +245,11 @@ public class DataverseService : IDataverseService
         var body = new Dictionary<string, object?>
         {
             ["mb_statusreason"] = DeliveryPackStatus.Generating,
-            ["mb_notescount"] = notesCount
+            ["mb_notescount"] = notesCount,
+            ["mb_url"] = null,
+            ["mb_mergedcount"] = null,
+            ["mb_generatedon"] = null,
+            ["mb_log"] = null
         };
         if (!string.IsNullOrWhiteSpace(packName))
             body["mb_name"] = packName;
@@ -309,16 +259,10 @@ public class DataverseService : IDataverseService
         response.EnsureSuccessStatusCode();
     }
 
-    public async Task<string[]> GetDeliveryNoteUrlsAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default)
+    public async Task<string[]> GetDeliveryNoteUrlsForDriverAndDateAsync(Guid effectiveDriverId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default)
     {
-        var dateFrom = deliveryDate.UtcDateTime.Date.ToString("yyyy-MM-dd");
-        var dateTo = deliveryDate.UtcDateTime.Date.AddDays(1).ToString("yyyy-MM-dd");
-
-        var filter = $"_mb_deliveryroute_value eq {routeId:D}" +
-                     $" and mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z" +
-                     $" and mb_url ne null and mb_url ne ''";
-
-        var nextUrl = (string?)$"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes?$filter={Uri.EscapeDataString(filter)}&$select=mb_url";
+        var fetchXml = BuildDeliveryNotesForDriverAndDateUrlsFetchXml(effectiveDriverId, deliveryDate);
+        var nextUrl = (string?)$"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes?fetchXml={Uri.EscapeDataString(fetchXml)}";
         var urls = new List<string>();
 
         while (!string.IsNullOrWhiteSpace(nextUrl))
@@ -346,16 +290,16 @@ public class DataverseService : IDataverseService
         return urls.ToArray();
     }
 
-    public async Task<string?> GetDeliveryRouteNameAsync(Guid routeId, CancellationToken cancellationToken = default)
+    public async Task<string?> GetDriverNameAsync(Guid driverId, CancellationToken cancellationToken = default)
     {
-        var url = $"{_dataverseUrl}/api/data/v9.2/mb_deliveryroutes({routeId:D})?$select=mb_name";
+        var url = $"{_dataverseUrl}/api/data/v9.2/contacts({driverId:D})?$select=fullname";
         using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
         if (!response.IsSuccessStatusCode)
             return null;
 
         using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
         var root = doc.RootElement;
-        return root.TryGetProperty("mb_name", out var nameProp) ? nameProp.GetString() : null;
+        return root.TryGetProperty("fullname", out var nameProp) ? nameProp.GetString() : null;
     }
 
     public async Task UpdateDeliveryPackCompleteAsync(Guid packId, string url, int mergedCount, DateTimeOffset generatedOn, CancellationToken cancellationToken = default)
@@ -545,6 +489,100 @@ public class DataverseService : IDataverseService
         }
 
         return [.. driverIds];
+    }
+
+    private static DateTimeOffset GetDeliveryDateForPack(JsonElement element, string propertyName, Guid deliveryNoteId, Guid orderId)
+    {
+        if (!element.TryGetProperty(propertyName, out var property))
+            throw MissingDeliveryPackGroupingException.MissingDeliveryDate(deliveryNoteId, orderId);
+
+        var value = property.GetString();
+        if (string.IsNullOrWhiteSpace(value))
+            throw MissingDeliveryPackGroupingException.MissingDeliveryDate(deliveryNoteId, orderId);
+
+        if (DateOnly.TryParse(value, CultureInfo.InvariantCulture, DateTimeStyles.None, out var date))
+            return new DateTimeOffset(date.ToDateTime(TimeOnly.MinValue), TimeSpan.Zero);
+
+        var dateTime = property.GetDateTimeOffset();
+        return new DateTimeOffset(dateTime.UtcDateTime.Date, TimeSpan.Zero);
+    }
+
+    private static string BuildDeliveryNotesForDriverAndDateCountFetchXml(Guid effectiveDriverId, DateTimeOffset deliveryDate, bool requireUrl)
+    {
+        var (dateFrom, dateTo) = GetDateRange(deliveryDate);
+        var noteFilter = requireUrl
+            ? """
+                <filter type='and'>
+                    <condition attribute='mb_url' operator='not-null' />
+                    <condition attribute='mb_url' operator='ne' value='' />
+                </filter>
+                """
+            : string.Empty;
+
+        return $"""
+            <fetch aggregate='true'>
+                <entity name='mb_deliverynote'>
+                    <attribute name='mb_deliverynoteid' alias='notecount' aggregate='count' />
+                    {noteFilter}
+                    <link-entity name='mb_order' from='mb_orderid' to='mb_order' link-type='inner'>
+                        <filter type='and'>
+                            <condition attribute='statecode' operator='eq' value='1' />
+                            <condition attribute='mb_effectivedriver' operator='eq' value='{effectiveDriverId:D}' />
+                            <condition attribute='mb_deliverydate' operator='on-or-after' value='{dateFrom}' />
+                            <condition attribute='mb_deliverydate' operator='lt' value='{dateTo}' />
+                        </filter>
+                    </link-entity>
+                </entity>
+            </fetch>
+            """;
+    }
+
+    private static string BuildDeliveryNotesForDriverAndDateUrlsFetchXml(Guid effectiveDriverId, DateTimeOffset deliveryDate)
+    {
+        var (dateFrom, dateTo) = GetDateRange(deliveryDate);
+
+        return $"""
+            <fetch>
+                <entity name='mb_deliverynote'>
+                    <attribute name='mb_url' />
+                    <filter type='and'>
+                        <condition attribute='mb_url' operator='not-null' />
+                        <condition attribute='mb_url' operator='ne' value='' />
+                    </filter>
+                    <link-entity name='mb_order' from='mb_orderid' to='mb_order' link-type='inner'>
+                        <filter type='and'>
+                            <condition attribute='statecode' operator='eq' value='1' />
+                            <condition attribute='mb_effectivedriver' operator='eq' value='{effectiveDriverId:D}' />
+                            <condition attribute='mb_deliverydate' operator='on-or-after' value='{dateFrom}' />
+                            <condition attribute='mb_deliverydate' operator='lt' value='{dateTo}' />
+                        </filter>
+                    </link-entity>
+                </entity>
+            </fetch>
+            """;
+    }
+
+    private static (string DateFrom, string DateTo) GetDateRange(DateTimeOffset deliveryDate)
+    {
+        var date = deliveryDate.UtcDateTime.Date;
+        return (date.ToString("yyyy-MM-dd", CultureInfo.InvariantCulture), date.AddDays(1).ToString("yyyy-MM-dd", CultureInfo.InvariantCulture));
+    }
+
+    private static int GetAggregateCount(JsonElement root, string alias)
+    {
+        if (!root.TryGetProperty("value", out var valueProp) || valueProp.GetArrayLength() == 0)
+            return 0;
+
+        var firstRow = valueProp[0];
+        if (!firstRow.TryGetProperty(alias, out var countProp))
+            return 0;
+
+        return countProp.ValueKind switch
+        {
+            JsonValueKind.Number => countProp.GetInt32(),
+            JsonValueKind.String when int.TryParse(countProp.GetString(), out var count) => count,
+            _ => 0
+        };
     }
 
     private static Guid GetRequiredLookupValue(JsonElement element, string propertyName, string message)
