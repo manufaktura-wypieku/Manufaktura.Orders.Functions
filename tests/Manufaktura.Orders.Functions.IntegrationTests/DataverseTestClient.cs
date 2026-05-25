@@ -104,6 +104,15 @@ public sealed class DataverseTestClient(HttpClient httpClient, TokenCredential c
             await DeleteEntityAsync("mb_orderitems", itemId, cancellationToken);
     }
 
+    public async Task DeleteDeliveryNotesForOrderAsync(Guid orderId, CancellationToken cancellationToken)
+    {
+        var filter = Uri.EscapeDataString($"_mb_order_value eq {orderId:D}");
+        var noteIds = await ListIdsAsync($"mb_deliverynotes?$select=mb_deliverynoteid&$filter={filter}", "mb_deliverynoteid", cancellationToken);
+
+        foreach (var noteId in noteIds)
+            await DeleteEntityAsync("mb_deliverynotes", noteId, cancellationToken);
+    }
+
     public async Task<OrderDriverSnapshot> GetOrderDriverSnapshotAsync(Guid orderId, CancellationToken cancellationToken)
     {
         using var document = await GetJsonAsync(
@@ -193,3 +202,7 @@ public sealed class DataverseTestClient(HttpClient httpClient, TokenCredential c
 }
 
 public sealed record OrderDriverSnapshot(Guid? HomeDeliveryRouteId, Guid? EffectiveDriverId, string? EffectiveDriverSource);
+
+public sealed record DeliveryNoteSnapshot(Guid Id, string? Name, string? Url);
+
+public sealed record DeliveryPackSnapshot(Guid Id, Guid? EffectiveDriverId, DateOnly DeliveryDate, int StatusReason, int? NotesCount, string? Url, string? Log);

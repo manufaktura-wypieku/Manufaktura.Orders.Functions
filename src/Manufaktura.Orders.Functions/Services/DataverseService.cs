@@ -210,7 +210,7 @@ public class DataverseService : IDataverseService
             ["mb_deliverydate"] = deliveryDate.UtcDateTime.Date.ToString("yyyy-MM-dd"),
             ["mb_statusreason"] = DeliveryPackStatus.Generating,
             ["mb_notescount"] = notesCount,
-            ["mb_effectivedriver@odata.bind"] = $"/contacts({effectiveDriverId:D})"
+            ["mb_deliverypack_effectivedriver@odata.bind"] = $"/contacts({effectiveDriverId:D})"
         };
         if (!string.IsNullOrWhiteSpace(packName))
             body["mb_name"] = packName;

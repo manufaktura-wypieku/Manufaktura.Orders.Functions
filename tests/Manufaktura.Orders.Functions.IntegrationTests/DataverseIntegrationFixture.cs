@@ -101,6 +101,15 @@ public sealed class DataverseIntegrationFixture : IAsyncLifetime
         return id;
     }
 
+    public async Task DeactivateOrderAsync(Guid orderId, CancellationToken cancellationToken)
+    {
+        await Dataverse.PatchEntityAsync("mb_orders", orderId, new Dictionary<string, object?>
+        {
+            ["statecode"] = 1,
+            ["statuscode"] = 2
+        }, cancellationToken);
+    }
+
     public async Task<JsonDocument> RefreshEffectiveDriversAsync(Guid orderId, CancellationToken cancellationToken)
         => await PostFunctionJsonAsync("api/RefreshEffectiveDrivers", new { orderId }, HttpStatusCode.OK, cancellationToken);
 
@@ -158,6 +167,129 @@ public sealed class DataverseIntegrationFixture : IAsyncLifetime
             $"source={lastSnapshot?.EffectiveDriverSource ?? "<null>"}.");
     }
 
+    public async Task<DeliveryNoteSnapshot> WaitForDeliveryNoteForOrderAsync(
+        Guid orderId,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow.Add(timeout);
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var filter = Uri.EscapeDataString($"_mb_order_value eq {orderId:D}");
+            using var document = await Dataverse.GetJsonAsync(
+                $"mb_deliverynotes?$select=mb_deliverynoteid,mb_name,mb_deliverydate,_mb_order_value,mb_url&$filter={filter}&$orderby=createdon desc&$top=1",
+                cancellationToken);
+
+            var values = document.RootElement.GetProperty("value");
+            if (values.GetArrayLength() > 0)
+            {
+                var note = values[0];
+                var snapshot = new DeliveryNoteSnapshot(
+                    Guid.Parse(note.GetProperty("mb_deliverynoteid").GetString()!),
+                    note.TryGetProperty("mb_name", out var name) ? name.GetString() : null,
+                    note.TryGetProperty("mb_url", out var url) ? url.GetString() : null);
+
+                Register("mb_deliverynotes", snapshot.Id);
+                return snapshot;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+        }
+
+        throw new TimeoutException($"No delivery note was created for order {orderId:D} within {timeout}.");
+    }
+
+    public async Task<DeliveryNoteSnapshot> WaitForDeliveryNoteUrlForOrderAsync(
+        Guid orderId,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow.Add(timeout);
+        DeliveryNoteSnapshot? lastSnapshot = null;
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var filter = Uri.EscapeDataString($"_mb_order_value eq {orderId:D}");
+            using var document = await Dataverse.GetJsonAsync(
+                $"mb_deliverynotes?$select=mb_deliverynoteid,mb_name,mb_deliverydate,_mb_order_value,mb_url&$filter={filter}&$orderby=createdon desc&$top=1",
+                cancellationToken);
+
+            var values = document.RootElement.GetProperty("value");
+            if (values.GetArrayLength() > 0)
+            {
+                var note = values[0];
+                lastSnapshot = new DeliveryNoteSnapshot(
+                    Guid.Parse(note.GetProperty("mb_deliverynoteid").GetString()!),
+                    note.TryGetProperty("mb_name", out var name) ? name.GetString() : null,
+                    note.TryGetProperty("mb_url", out var url) ? url.GetString() : null);
+
+                Register("mb_deliverynotes", lastSnapshot.Id);
+
+                if (!string.IsNullOrWhiteSpace(lastSnapshot.Url))
+                    return lastSnapshot;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+        }
+
+        throw new TimeoutException(
+            $"Delivery note URL was not populated for order {orderId:D} within {timeout}. " +
+            $"Last note: id={lastSnapshot?.Id.ToString("D") ?? "<none>"}, url={lastSnapshot?.Url ?? "<null>"}.");
+    }
+
+    public async Task<DeliveryPackSnapshot> WaitForDeliveryPackAsync(
+        Guid effectiveDriverId,
+        DateOnly deliveryDate,
+        int expectedStatusReason,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var deadline = DateTimeOffset.UtcNow.Add(timeout);
+        DeliveryPackSnapshot? lastSnapshot = null;
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var dateFrom = deliveryDate.ToString("yyyy-MM-dd");
+            var dateTo = deliveryDate.AddDays(1).ToString("yyyy-MM-dd");
+            var filter = Uri.EscapeDataString(
+                $"_mb_effectivedriver_value eq {effectiveDriverId:D} and mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z and statecode eq 0");
+
+            using var document = await Dataverse.GetJsonAsync(
+                "mb_deliverypacks?$select=mb_deliverypackid,mb_name,mb_deliverydate,_mb_effectivedriver_value,mb_statusreason,mb_notescount,mb_url,mb_log" +
+                $"&$filter={filter}&$orderby=createdon desc&$top=1",
+                cancellationToken);
+
+            var values = document.RootElement.GetProperty("value");
+            if (values.GetArrayLength() > 0)
+            {
+                var pack = values[0];
+                lastSnapshot = new DeliveryPackSnapshot(
+                    Guid.Parse(pack.GetProperty("mb_deliverypackid").GetString()!),
+                    GetLookupValue(pack, "_mb_effectivedriver_value"),
+                    GetDateOnly(pack, "mb_deliverydate"),
+                    pack.GetProperty("mb_statusreason").GetInt32(),
+                    pack.TryGetProperty("mb_notescount", out var notesCount) && notesCount.ValueKind == JsonValueKind.Number ? notesCount.GetInt32() : null,
+                    pack.TryGetProperty("mb_url", out var url) ? url.GetString() : null,
+                    pack.TryGetProperty("mb_log", out var log) ? log.GetString() : null);
+
+                Register("mb_deliverypacks", lastSnapshot.Id);
+
+                if (lastSnapshot.StatusReason == expectedStatusReason)
+                    return lastSnapshot;
+            }
+
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+        }
+
+        throw new TimeoutException(
+            $"Delivery pack for effective driver {effectiveDriverId:D} on {deliveryDate:yyyy-MM-dd} did not reach status reason {expectedStatusReason} within {timeout}. " +
+            $"Last snapshot: id={lastSnapshot?.Id.ToString("D") ?? "<none>"}, status={lastSnapshot?.StatusReason.ToString() ?? "<none>"}, notes={lastSnapshot?.NotesCount?.ToString() ?? "<null>"}.");
+    }
+
     public static DateOnly GetNextMonday()
     {
         var today = DateOnly.FromDateTime(DateTime.UtcNow.Date);
@@ -174,7 +306,10 @@ public sealed class DataverseIntegrationFixture : IAsyncLifetime
     public async ValueTask DisposeAsync()
     {
         foreach (var orderId in _createdOrderIds.Distinct())
+        {
+            await Dataverse.DeleteDeliveryNotesForOrderAsync(orderId, CancellationToken.None);
             await Dataverse.DeleteOrderItemsForOrderAsync(orderId, CancellationToken.None);
+        }
 
         foreach (var record in _createdRecords.AsEnumerable().Reverse())
         {
@@ -198,7 +333,29 @@ public sealed class DataverseIntegrationFixture : IAsyncLifetime
         return value;
     }
 
-    private void Register(string entitySetName, Guid id) => _createdRecords.Add(new CreatedRecord(entitySetName, id));
+    private void Register(string entitySetName, Guid id)
+    {
+        if (_createdRecords.Any(record => record.EntitySetName == entitySetName && record.Id == id))
+            return;
+
+        _createdRecords.Add(new CreatedRecord(entitySetName, id));
+    }
+
+    private static Guid? GetLookupValue(JsonElement root, string propertyName)
+    {
+        if (!root.TryGetProperty(propertyName, out var property) || property.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+            return null;
+
+        return Guid.TryParse(property.GetString(), out var id) ? id : null;
+    }
+
+    private static DateOnly GetDateOnly(JsonElement root, string propertyName)
+    {
+        var value = root.GetProperty(propertyName).GetString()!;
+        return DateOnly.TryParse(value, out var date)
+            ? date
+            : DateOnly.FromDateTime(DateTimeOffset.Parse(value).DateTime);
+    }
 
     private static string GetRequiredConfigurationValue(string name)
         => GetOptionalConfigurationValue(name)

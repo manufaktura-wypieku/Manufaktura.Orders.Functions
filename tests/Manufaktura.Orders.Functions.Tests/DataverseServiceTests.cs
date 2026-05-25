@@ -110,7 +110,8 @@ public class DataverseServiceTests
         Assert.True(created);
         Assert.Equal(newPackId, packId);
         Assert.Contains("\"mb_name\":\"Test Pack\"", handler.SentRequests[0].Body);
-        Assert.Contains($"\"mb_effectivedriver@odata.bind\":\"/contacts({driverId:D})\"", handler.SentRequests[0].Body);
+        Assert.Contains($"\"mb_deliverypack_effectivedriver@odata.bind\":\"/contacts({driverId:D})\"", handler.SentRequests[0].Body);
+        Assert.DoesNotContain("mb_effectivedriver@odata.bind", handler.SentRequests[0].Body);
         Assert.DoesNotContain("mb_deliveryroute@odata.bind", handler.SentRequests[0].Body);
     }
 
