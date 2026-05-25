@@ -89,6 +89,14 @@ $env:FUNCTION_APP_BASE_URL = "https://func-mfk-orders-dev.azurewebsites.net"
 $env:FUNCTION_APP_KEY = "<function-key>"
 ```
 
+E2E polling timeouts default to shorter waits for fast feedback and can be raised when Power Automate is slow:
+
+```powershell
+$env:E2E_FAST_TIMEOUT_SECONDS = "30"
+$env:E2E_FLOW_TIMEOUT_SECONDS = "120"
+$env:E2E_PACK_TIMEOUT_SECONDS = "60"
+```
+
 Do not run write integration tests against production. Dev/test runs create uniquely named `[E2E]` records and clean them up on a best-effort basis.
 
 ## Deployment

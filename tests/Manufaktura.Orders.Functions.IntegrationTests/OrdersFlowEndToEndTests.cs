@@ -4,6 +4,8 @@ namespace Manufaktura.Orders.Functions.IntegrationTests;
 
 public sealed class OrdersFlowEndToEndTests(DataverseIntegrationFixture fixture) : IClassFixture<DataverseIntegrationFixture>
 {
+    private const int DefaultFlowTimeoutSeconds = 120;
+    private const int DefaultPackTimeoutSeconds = 60;
     private const int DeliveryPackCompleteStatusReason = 124530002;
 
     [Fact]
@@ -25,7 +27,7 @@ public sealed class OrdersFlowEndToEndTests(DataverseIntegrationFixture fixture)
             routeId,
             driverId,
             "RouteWeekday",
-            TimeSpan.FromSeconds(GetTimeoutSeconds("E2E_FLOW_TIMEOUT_SECONDS", 240)),
+            TimeSpan.FromSeconds(GetTimeoutSeconds("E2E_FLOW_TIMEOUT_SECONDS", DefaultFlowTimeoutSeconds)),
             cancellationToken);
 
         Assert.Equal(routeId, snapshot.HomeDeliveryRouteId);
@@ -40,7 +42,8 @@ public sealed class OrdersFlowEndToEndTests(DataverseIntegrationFixture fixture)
         var cancellationToken = TestContext.Current.CancellationToken;
         var suffix = DataverseIntegrationFixture.CreateRunSuffix();
         var deliveryDate = DataverseIntegrationFixture.GetNextMonday();
-        var flowTimeout = TimeSpan.FromSeconds(GetTimeoutSeconds("E2E_FLOW_TIMEOUT_SECONDS", 240));
+        var flowTimeout = TimeSpan.FromSeconds(GetTimeoutSeconds("E2E_FLOW_TIMEOUT_SECONDS", DefaultFlowTimeoutSeconds));
+        var packTimeout = TimeSpan.FromSeconds(GetTimeoutSeconds("E2E_PACK_TIMEOUT_SECONDS", DefaultPackTimeoutSeconds));
 
         var priceListId = await fixture.Dataverse.GetFirstReusablePriceListIdAsync(cancellationToken);
         var driverId = await fixture.CreateDriverContactAsync(suffix, cancellationToken);
@@ -66,7 +69,7 @@ public sealed class OrdersFlowEndToEndTests(DataverseIntegrationFixture fixture)
             driverId,
             deliveryDate,
             DeliveryPackCompleteStatusReason,
-            flowTimeout,
+            packTimeout,
             cancellationToken);
 
         Assert.Equal(driverId, pack.EffectiveDriverId);
