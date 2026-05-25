@@ -62,6 +62,8 @@ public sealed class OrdersFlowEndToEndTests(DataverseIntegrationFixture fixture)
             flowTimeout,
             cancellationToken);
 
+        await fixture.WaitForGeneratedOrderItemsReadyAsync(orderId, flowTimeout, cancellationToken);
+
         await fixture.DeactivateOrderAsync(orderId, cancellationToken);
         var note = await fixture.WaitForDeliveryNoteUrlForOrderAsync(orderId, flowTimeout, cancellationToken);
 

@@ -167,6 +167,33 @@ public sealed class DataverseIntegrationFixture : IAsyncLifetime
             $"source={lastSnapshot?.EffectiveDriverSource ?? "<null>"}.");
     }
 
+    public async Task<OrderItemsReadinessSnapshot> WaitForGeneratedOrderItemsReadyAsync(
+        Guid orderId,
+        TimeSpan timeout,
+        CancellationToken cancellationToken)
+    {
+        var expectedCount = await Dataverse.CountActiveProductsAsync(cancellationToken);
+        var deadline = DateTimeOffset.UtcNow.Add(timeout);
+        OrderItemsReadinessSnapshot? lastSnapshot = null;
+
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            lastSnapshot = await Dataverse.GetOrderItemsReadinessSnapshotAsync(orderId, expectedCount, cancellationToken);
+
+            if (lastSnapshot.ActualCount >= expectedCount && lastSnapshot.ReadyCount == lastSnapshot.ActualCount)
+                return lastSnapshot;
+
+            await Task.Delay(TimeSpan.FromSeconds(2), cancellationToken);
+        }
+
+        throw new TimeoutException(
+            $"Generated order items for order {orderId:D} were not ready within {timeout}. " +
+            $"Last snapshot: expected={lastSnapshot?.ExpectedCount.ToString() ?? expectedCount.ToString()}, " +
+            $"actual={lastSnapshot?.ActualCount.ToString() ?? "<none>"}, " +
+            $"ready={lastSnapshot?.ReadyCount.ToString() ?? "<none>"}.");
+    }
+
     public async Task<DeliveryNoteSnapshot> WaitForDeliveryNoteForOrderAsync(
         Guid orderId,
         TimeSpan timeout,

@@ -54,6 +54,16 @@ public sealed class DataverseTestClient(HttpClient httpClient, TokenCredential c
         return GetLookupValue(values[0], "_mb_pricelist_value");
     }
 
+    public async Task<int> CountActiveProductsAsync(CancellationToken cancellationToken)
+    {
+        var productIds = await ListIdsAsync(
+            "mb_products?$select=mb_productid&$filter=statecode eq 0",
+            "mb_productid",
+            cancellationToken);
+
+        return productIds.Count;
+    }
+
     public async Task<Guid> CreateEntityAsync(string entitySetName, IReadOnlyDictionary<string, object?> body, CancellationToken cancellationToken)
     {
         using var response = await SendAsync(HttpMethod.Post, entitySetName, body, cancellationToken);
@@ -126,6 +136,30 @@ public sealed class DataverseTestClient(HttpClient httpClient, TokenCredential c
             root.TryGetProperty("mb_effectivedriversource", out var source) ? source.GetString() : null);
     }
 
+    public async Task<OrderItemsReadinessSnapshot> GetOrderItemsReadinessSnapshotAsync(Guid orderId, int expectedCount, CancellationToken cancellationToken)
+    {
+        var actualCount = 0;
+        var readyCount = 0;
+        var filter = Uri.EscapeDataString($"_mb_order_value eq {orderId:D}");
+        var nextUrl = $"mb_orderitems?$select=mb_orderitemid,mb_quantity,mb_priceunit,mb_value&$filter={filter}";
+
+        while (!string.IsNullOrWhiteSpace(nextUrl))
+        {
+            using var document = await GetJsonAsync(nextUrl, cancellationToken);
+            var values = document.RootElement.GetProperty("value");
+            foreach (var row in values.EnumerateArray())
+            {
+                actualCount++;
+                if (HasNumber(row, "mb_quantity") && HasNumber(row, "mb_priceunit") && HasNumber(row, "mb_value"))
+                    readyCount++;
+            }
+
+            nextUrl = document.RootElement.TryGetProperty("@odata.nextLink", out var nextLink) ? nextLink.GetString() : null;
+        }
+
+        return new OrderItemsReadinessSnapshot(expectedCount, actualCount, readyCount);
+    }
+
     public async Task<JsonDocument> GetJsonAsync(string relativeOrAbsoluteUrl, CancellationToken cancellationToken)
     {
         using var response = await SendAsync(HttpMethod.Get, relativeOrAbsoluteUrl, body: null, cancellationToken);
@@ -194,6 +228,9 @@ public sealed class DataverseTestClient(HttpClient httpClient, TokenCredential c
         return Guid.TryParse(property.GetString(), out var id) ? id : null;
     }
 
+    private static bool HasNumber(JsonElement root, string propertyName)
+        => root.TryGetProperty(propertyName, out var property) && property.ValueKind == JsonValueKind.Number;
+
     private static async Task<HttpRequestException> CreateRequestExceptionAsync(HttpResponseMessage response, string message, CancellationToken cancellationToken)
     {
         var body = response.Content is null ? string.Empty : await response.Content.ReadAsStringAsync(cancellationToken);
@@ -202,6 +239,8 @@ public sealed class DataverseTestClient(HttpClient httpClient, TokenCredential c
 }
 
 public sealed record OrderDriverSnapshot(Guid? HomeDeliveryRouteId, Guid? EffectiveDriverId, string? EffectiveDriverSource);
+
+public sealed record OrderItemsReadinessSnapshot(int ExpectedCount, int ActualCount, int ReadyCount);
 
 public sealed record DeliveryNoteSnapshot(Guid Id, string? Name, string? Url);
 
