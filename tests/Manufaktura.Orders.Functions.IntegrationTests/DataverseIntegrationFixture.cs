@@ -172,6 +172,9 @@ public sealed class DataverseIntegrationFixture : IAsyncLifetime
         TimeSpan timeout,
         CancellationToken cancellationToken)
     {
+        // TODO: Remove this workaround when order item generation is made synchronous or owned by a single command.
+        // The Delivery Note document flow formats mb_priceunit/mb_value immediately after order deactivation;
+        // deactivating before the order-item flows finish can make it fail with formatNumber(null).
         var expectedCount = await Dataverse.CountActiveProductsAsync(cancellationToken);
         var deadline = DateTimeOffset.UtcNow.Add(timeout);
         OrderItemsReadinessSnapshot? lastSnapshot = null;
