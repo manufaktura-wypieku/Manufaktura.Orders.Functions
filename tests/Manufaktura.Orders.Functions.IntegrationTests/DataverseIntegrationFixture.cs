@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http.Json;
 using System.Text.Json;
 using Azure.Identity;
@@ -101,18 +102,28 @@ public sealed class DataverseIntegrationFixture : IAsyncLifetime
     }
 
     public async Task<JsonDocument> RefreshEffectiveDriversAsync(Guid orderId, CancellationToken cancellationToken)
+        => await PostFunctionJsonAsync("api/RefreshEffectiveDrivers", new { orderId }, HttpStatusCode.OK, cancellationToken);
+
+    public async Task<JsonDocument> ResolveEffectiveDriverAsync(Guid orderId, CancellationToken cancellationToken)
+        => await PostFunctionJsonAsync("api/ResolveEffectiveDriver", new { orderId }, HttpStatusCode.OK, cancellationToken);
+
+    public async Task<JsonDocument> PostFunctionJsonAsync(
+        string relativePath,
+        object body,
+        HttpStatusCode expectedStatusCode,
+        CancellationToken cancellationToken)
     {
-        using var response = await _functionHttp.PostAsJsonAsync("api/RefreshEffectiveDrivers", new { orderId }, cancellationToken);
-        if (!response.IsSuccessStatusCode)
+        using var response = await _functionHttp.PostAsJsonAsync(relativePath, body, cancellationToken);
+        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+        if (response.StatusCode != expectedStatusCode)
         {
-            var body = await response.Content.ReadAsStringAsync(cancellationToken);
             throw new HttpRequestException(
-                $"RefreshEffectiveDrivers returned {(int)response.StatusCode} {response.ReasonPhrase}. {body}",
+                $"{relativePath} returned {(int)response.StatusCode} {response.ReasonPhrase}; expected {(int)expectedStatusCode} {expectedStatusCode}. {responseBody}",
                 null,
                 response.StatusCode);
         }
 
-        return await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        return JsonDocument.Parse(string.IsNullOrWhiteSpace(responseBody) ? "{}" : responseBody);
     }
 
     public async Task<OrderDriverSnapshot> WaitForOrderDriverSnapshotAsync(

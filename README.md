@@ -72,6 +72,8 @@ $env:DATAVERSE_URL = "https://manufaktura-develop.crm11.dynamics.com"
 dotnet test tests/Manufaktura.Orders.Functions.IntegrationTests --filter "Category=Smoke"
 ```
 
+Use `Category=Smoke` for the direct deployed-Function checks that are suitable after dev/test deployments. Use `Category=E2E` for slower Dataverse-triggered flow checks, such as creating an order and waiting for the glue flow to populate effective-driver fields.
+
 PowerShell `$env:` values only apply to the terminal where they are set. If you run tests from VS Code Test Explorer or CodeLens, create `tests/Manufaktura.Orders.Functions.IntegrationTests/integration-tests.local.json` instead:
 
 ```json
