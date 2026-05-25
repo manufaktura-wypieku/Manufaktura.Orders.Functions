@@ -1,0 +1,4 @@
+{
+  "rollForward": "LatestMinor",
+  "allowPrerelease": true
+}

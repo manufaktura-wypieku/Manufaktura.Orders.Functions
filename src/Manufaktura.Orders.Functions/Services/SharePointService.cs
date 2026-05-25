@@ -37,11 +37,11 @@ public class SharePointService : ISharePointService
         }
     }
 
-    public async Task<string> UploadDeliveryPackAsync(string routeName, DateTimeOffset deliveryDate, byte[] pdfContent, CancellationToken cancellationToken = default)
+    public async Task<string> UploadDeliveryPackAsync(string packFolderName, DateTimeOffset deliveryDate, byte[] pdfContent, CancellationToken cancellationToken = default)
     {
-        var safeRouteName = SanitizePathSegment(routeName);
+        var safePackFolderName = SanitizePathSegment(packFolderName);
         var fileName = $"{deliveryDate:yyyy-MM-dd}-delivery-pack.pdf";
-        var itemPath = $"DeliveryPacks/{safeRouteName}/{fileName}";
+        var itemPath = $"DeliveryPacks/{safePackFolderName}/{fileName}";
 
         var (siteId, _) = DocumentMergeService.ParseSharePointUrl(_sharePointSiteUrl + "/Shared%20Documents/placeholder");
 
@@ -58,7 +58,7 @@ public class SharePointService : ISharePointService
 
         // Ensure the target folder hierarchy exists before uploading;
         // Graph does not create intermediate folders automatically for upload sessions.
-        await EnsureFolderAsync(siteGraphUrl, $"DeliveryPacks/{safeRouteName}", token.Token, cancellationToken);
+        await EnsureFolderAsync(siteGraphUrl, $"DeliveryPacks/{safePackFolderName}", token.Token, cancellationToken);
 
         if (pdfContent.Length <= SimpleUploadThresholdBytes)
         {
@@ -72,7 +72,7 @@ public class SharePointService : ISharePointService
         // Return the SharePoint URL of the uploaded file.
         var siteBase = new Uri(_sharePointSiteUrl).GetLeftPart(UriPartial.Authority);
         var sitePath = new Uri(_sharePointSiteUrl).AbsolutePath.TrimEnd('/');
-        return $"{siteBase}{sitePath}/Shared%20Documents/{Uri.EscapeDataString("DeliveryPacks")}/{Uri.EscapeDataString(safeRouteName)}/{Uri.EscapeDataString(fileName)}";
+        return $"{siteBase}{sitePath}/Shared%20Documents/{Uri.EscapeDataString("DeliveryPacks")}/{Uri.EscapeDataString(safePackFolderName)}/{Uri.EscapeDataString(fileName)}";
     }
 
     private async Task SimpleUploadAsync(string contentUrl, byte[] pdfContent, string bearerToken, CancellationToken cancellationToken)

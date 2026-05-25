@@ -12,11 +12,9 @@ Azure Functions service for the Manufaktura Orders system. Provides HTTP-trigger
 
 ## Project Structure
 
-```
+```text
 ├── .github/workflows/       # CI/CD pipelines
-│   ├── ci.yml               # PR validation (build + test)
-│   ├── ci-cd.yml            # Main pipeline (build → dev → test → prod)
-│   └── deploy.yml           # Reusable deployment workflow
+│   └── ci.yml               # PR validation + trusted PR/main deployment to dev
 ├── infra/                   # Bicep infrastructure
 │   ├── main.bicep            # Resource definitions
 │   ├── main.dev.bicepparam   # Dev parameters
@@ -27,7 +25,9 @@ Azure Functions service for the Manufaktura Orders system. Provides HTTP-trigger
 │   ├── Functions/            # HTTP-triggered functions
 │   ├── Models/               # Request/response DTOs
 │   └── Services/             # Business logic
-└── tests/Manufaktura.Orders.Functions.Tests/
+└── tests/
+  ├── Manufaktura.Orders.Functions.Tests/
+  └── Manufaktura.Orders.Functions.IntegrationTests/
 ```
 
 ## Functions
@@ -53,8 +53,51 @@ func start
 ### Run tests
 
 ```bash
-dotnet test
+dotnet test tests/Manufaktura.Orders.Functions.Tests
 ```
+
+### Run integration tests
+
+Integration tests run against real Dataverse environments and deployed Orders Functions. They require Azure credentials resolvable by `DefaultAzureCredential`, usually `az login` locally or GitHub Actions OIDC in CI.
+
+The smoke integration suite reads the Function App base URL and key from Dataverse environment variables used by the Power Automate flows:
+
+- `mb_OrdersFunctionAppBaseUrl`
+- `mb_OrdersFunctionAppKey`
+
+Set only the target Dataverse URL locally:
+
+```powershell
+$env:DATAVERSE_URL = "https://manufaktura-develop.crm11.dynamics.com"
+dotnet test tests/Manufaktura.Orders.Functions.IntegrationTests --filter "Category=Smoke"
+```
+
+Use `Category=Smoke` for the direct deployed-Function checks that are suitable after dev/test deployments. Use `Category=E2E` for slower Dataverse-triggered flow checks, such as creating an order and waiting for the glue flow to populate effective-driver fields.
+
+PowerShell `$env:` values only apply to the terminal where they are set. If you run tests from VS Code Test Explorer or CodeLens, create `tests/Manufaktura.Orders.Functions.IntegrationTests/integration-tests.local.json` instead:
+
+```json
+{
+  "DATAVERSE_URL": "https://manufaktura-develop.crm11.dynamics.com"
+}
+```
+
+Optional local overrides are available for debugging a specific Function App without changing Dataverse configuration:
+
+```powershell
+$env:FUNCTION_APP_BASE_URL = "https://func-mfk-orders-dev.azurewebsites.net"
+$env:FUNCTION_APP_KEY = "<function-key>"
+```
+
+E2E polling timeouts default to shorter waits for fast feedback and can be raised when Power Automate is slow:
+
+```powershell
+$env:E2E_FAST_TIMEOUT_SECONDS = "30"
+$env:E2E_FLOW_TIMEOUT_SECONDS = "120"
+$env:E2E_PACK_TIMEOUT_SECONDS = "60"
+```
+
+Do not run write integration tests against production. Dev/test runs create uniquely named `[E2E]` records and clean them up on a best-effort basis.
 
 ## Deployment
 
@@ -79,17 +122,29 @@ To skip Dataverse setup entirely, pass empty strings for all three URL parameter
 
 ### CI/CD
 
-Pushes to `main` trigger the full pipeline:
+The `CI` workflow runs on pull requests to `main` and on pushes to `main`.
 
-1. **Build & Test** — compile + run unit tests
-2. **Deploy to Dev** — Bicep infra + zip deploy
-3. **Deploy to Test** — automatic after dev succeeds
-4. **Manual Approval** — required before production
-5. **Deploy to Prod** — after approval
+1. **Build & Test** — compile and run unit tests.
+2. **Package** — publish the Function App and upload the validated zip package as a short-lived workflow artifact.
+3. **Deploy to Dev** — deploy dev Bicep infrastructure, then publish the package to the shared dev Function App.
+4. **Smoke Test** — call `GenerateDeliveryPack` with non-destructive invalid input and expect the function's validation response.
+5. **Integration Smoke** — on `main`, create temporary Dataverse records in dev/test, call `RefreshEffectiveDrivers`, assert order driver fields, and clean up.
+
+Trusted same-repository pull requests deploy to the shared dev Function App after build and tests pass. Pull requests from forks still run build and tests, but they do not deploy because the repository is public and dev deployment uses Azure OIDC credentials. When a PR is merged, the resulting push to `main` deploys `main` back to dev so the shared environment returns to the integration baseline.
+
+Dev deployments use one global concurrency group. A newer dev deployment cancels any older in-flight dev deployment, so the shared dev environment always represents the latest successful deployment attempt. The workflow updates a sticky PR comment with the Function App URL, deployed revision, and workflow run link; function keys are never posted to PR comments.
+
+Before enabling deployments, run the OIDC setup script and confirm the repository has these secrets:
+
+- `AZURE_CLIENT_ID`
+- `AZURE_TENANT_ID`
+- `AZURE_SUBSCRIPTION_ID`
+
+The setup script also creates the GitHub `dev` environment used by the deployment job's federated credential.
 
 ### Post-deployment
 
-The Function App's Managed Identity needs the **Files.Read.All** application role on Microsoft Graph to download SharePoint documents. Because this is a managed identity (not an app registration), the role must be assigned directly to the managed identity's service principal using `az rest`.
+The Function App's Managed Identity needs the **Sites.ReadWrite.All** application role on Microsoft Graph to read and write SharePoint documents. Because this is a managed identity (not an app registration), the role must be assigned directly to the managed identity's service principal using `az rest`.
 
 Retrieve the `managedIdentityPrincipalId` from the Bicep deployment output, then run:
 
@@ -100,15 +155,15 @@ MI_SP_ID="<managedIdentityPrincipalId>"
 # 2. Get Microsoft Graph's service principal ID in this tenant
 GRAPH_SP_ID=$(az ad sp show --id 00000003-0000-0000-c000-000000000000 --query id -o tsv)
 
-# 3. Assign the Files.Read.All app role to the managed identity
-#    App role ID 01d4889c-1287-42c6-ac1f-5d1e02578ef6 = Files.Read.All (application)
+# 3. Assign the Sites.ReadWrite.All app role to the managed identity
+#    App role ID 9492366f-7969-46a4-8d15-ed1a20078fff = Sites.ReadWrite.All (application)
 az rest --method POST \
   --uri "https://graph.microsoft.com/v1.0/servicePrincipals/${MI_SP_ID}/appRoleAssignments" \
   --headers "Content-Type=application/json" \
   --body "{
     \"principalId\": \"${MI_SP_ID}\",
     \"resourceId\": \"${GRAPH_SP_ID}\",
-    \"appRoleId\": \"01d4889c-1287-42c6-ac1f-5d1e02578ef6\"
+    \"appRoleId\": \"9492366f-7969-46a4-8d15-ed1a20078fff\"
   }"
 ```
 

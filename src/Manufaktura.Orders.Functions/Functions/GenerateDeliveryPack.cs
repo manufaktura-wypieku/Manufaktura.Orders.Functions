@@ -92,7 +92,7 @@ public class GenerateDeliveryPack
 
     private async Task<IActionResult> RunOrchestrationAsync(Guid noteId, CancellationToken cancellationToken)
     {
-        // Step 1: Read delivery note to get route and delivery date.
+        // Step 1: Read delivery note to get the order's effective driver and delivery date.
         _logger.LogInformation("Reading delivery note {NoteId}", noteId);
         DeliveryNoteRecord note;
         try
@@ -112,45 +112,33 @@ public class GenerateDeliveryPack
                 StatusCode = StatusCodes.Status502BadGateway
             };
         }
-        catch (MissingDeliveryRouteException ex)
+        catch (MissingDeliveryPackGroupingException ex)
         {
-            _logger.LogWarning(ex, "Delivery note {NoteId} has no delivery route assigned", noteId);
-            return new ObjectResult(new { error = "Delivery note has no delivery route assigned.", code = "missing_delivery_route" })
+            _logger.LogWarning(ex, "Delivery note {NoteId} cannot determine delivery-pack grouping", noteId);
+            return new ObjectResult(new { error = ex.Message, code = ex.Code })
             {
                 StatusCode = StatusCodes.Status422UnprocessableEntity
             };
         }
 
-        _logger.LogInformation("Delivery note {NoteId}: route={RouteId}, date={Date}", noteId, note.RouteId, note.DeliveryDate.Date);
+        _logger.LogInformation("Delivery note {NoteId}: order={OrderId}, effectiveDriver={DriverId}, date={Date}", noteId, note.OrderId, note.EffectiveDriverId, note.DeliveryDate.Date);
 
-        // Step 2: Count completed orders for the route/date — used only as an early-exit guard.
-        // This avoids Dataverse calls for routes/dates with no activity at all.
-        var orderCount = await _dataverse.CountCompletedOrdersByRouteAndDateAsync(note.RouteId, note.DeliveryDate, cancellationToken);
-        _logger.LogInformation("Completed orders for route {RouteId} on {Date}: {Count}", note.RouteId, note.DeliveryDate.Date, orderCount);
-
-        // Step 3: Exit early if there are no completed orders — avoids unnecessary Dataverse calls.
-        if (orderCount == 0)
-        {
-            _logger.LogInformation("No completed orders for route {RouteId} on {Date}. Exiting.", note.RouteId, note.DeliveryDate.Date);
-            return new OkObjectResult(new { status = "skipped", reason = "no_orders", orderCount });
-        }
-
-        // Step 4: Count total delivery notes for the route/date.
+        // Step 2: Count total delivery notes for the effective driver/date.
         // We compare total notes to notes-with-URL rather than notes to orders because:
         // - Not every inactive order necessarily has a delivery note (e.g. cancelled orders)
         // - The readiness criterion is "all existing delivery notes have been uploaded to SharePoint"
-        var totalNoteCount = await _dataverse.CountTotalDeliveryNotesAsync(note.RouteId, note.DeliveryDate, cancellationToken);
+        var totalNoteCount = await _dataverse.CountTotalDeliveryNotesForDriverAndDateAsync(note.EffectiveDriverId, note.DeliveryDate, cancellationToken);
 
-        // Step 5: Exit early if there are no delivery notes yet — avoids an unnecessary Dataverse call.
+        // Step 3: Exit early if there are no delivery notes yet.
         if (totalNoteCount == 0)
         {
-            _logger.LogInformation("No delivery notes found for route {RouteId} on {Date}. Exiting.", note.RouteId, note.DeliveryDate.Date);
+            _logger.LogInformation("No delivery notes found for effective driver {DriverId} on {Date}. Exiting.", note.EffectiveDriverId, note.DeliveryDate.Date);
             return new OkObjectResult(new { status = "skipped", reason = "not_all_notes_ready", notesWithUrlCount = 0, totalNoteCount });
         }
 
-        // Step 6: Count delivery notes with a URL and exit if not all are ready.
-        var notesWithUrlCount = await _dataverse.CountDeliveryNotesWithUrlAsync(note.RouteId, note.DeliveryDate, cancellationToken);
-        _logger.LogInformation("Delivery notes for route {RouteId} on {Date}: {WithUrl}/{Total} have a URL", note.RouteId, note.DeliveryDate.Date, notesWithUrlCount, totalNoteCount);
+        // Step 4: Count delivery notes with a URL and exit if not all are ready.
+        var notesWithUrlCount = await _dataverse.CountDeliveryNotesWithUrlForDriverAndDateAsync(note.EffectiveDriverId, note.DeliveryDate, cancellationToken);
+        _logger.LogInformation("Delivery notes for effective driver {DriverId} on {Date}: {WithUrl}/{Total} have a URL", note.EffectiveDriverId, note.DeliveryDate.Date, notesWithUrlCount, totalNoteCount);
 
         if (notesWithUrlCount < totalNoteCount)
         {
@@ -158,33 +146,33 @@ public class GenerateDeliveryPack
             return new OkObjectResult(new { status = "skipped", reason = "not_all_notes_ready", notesWithUrlCount, totalNoteCount });
         }
 
-        // Step 7: Check for an existing delivery pack (for the concurrency guard).
-        var existingPack = await _dataverse.GetDeliveryPackAsync(note.RouteId, note.DeliveryDate, cancellationToken);
+        // Step 5: Check for an existing active delivery pack (for the concurrency guard and regeneration).
+        var existingPack = await _dataverse.GetActiveDeliveryPackAsync(note.EffectiveDriverId, note.DeliveryDate, cancellationToken);
 
-        if (existingPack is not null && existingPack.StatusCode is DeliveryPackStatus.Generating or DeliveryPackStatus.Complete)
+        if (existingPack is not null && existingPack.StatusCode is DeliveryPackStatus.Generating)
         {
             _logger.LogInformation("Delivery pack {PackId} is already {Status}. Exiting.", existingPack.Id, existingPack.StatusCode);
             return new OkObjectResult(new { status = "skipped", reason = "already_generating", packId = existingPack.Id });
         }
 
-        // Step 8: Collect all delivery note document URLs before creating/updating the pack,
+        // Step 6: Collect all delivery note document URLs before creating/updating the pack,
         //         so we can skip cleanly if no URLs are available.
-        var documentUrls = await _dataverse.GetDeliveryNoteUrlsAsync(note.RouteId, note.DeliveryDate, cancellationToken);
-        _logger.LogInformation("Found {Count} delivery note document URLs for route {RouteId} on {Date}.", documentUrls.Length, note.RouteId, note.DeliveryDate.Date);
+        var documentUrls = await _dataverse.GetDeliveryNoteUrlsForDriverAndDateAsync(note.EffectiveDriverId, note.DeliveryDate, cancellationToken);
+        _logger.LogInformation("Found {Count} delivery note document URLs for effective driver {DriverId} on {Date}.", documentUrls.Length, note.EffectiveDriverId, note.DeliveryDate.Date);
 
         if (documentUrls.Length == 0)
         {
-            _logger.LogInformation("No document URLs found for route {RouteId} on {Date}. Exiting.", note.RouteId, note.DeliveryDate.Date);
+            _logger.LogInformation("No document URLs found for effective driver {DriverId} on {Date}. Exiting.", note.EffectiveDriverId, note.DeliveryDate.Date);
             return new OkObjectResult(new { status = "skipped", reason = "no_document_urls" });
         }
 
-        // Step 8b: Fetch delivery route name for pack naming and SharePoint upload path.
-        var routeName = await _dataverse.GetDeliveryRouteNameAsync(note.RouteId, cancellationToken);
-        if (string.IsNullOrWhiteSpace(routeName))
-            routeName = note.RouteId.ToString("D");
-        var packName = $"{routeName} - {note.DeliveryDate:yyyy-MM-dd}";
+        // Step 7: Fetch driver name for pack naming and SharePoint upload path.
+        var driverName = await _dataverse.GetDriverNameAsync(note.EffectiveDriverId, cancellationToken);
+        if (string.IsNullOrWhiteSpace(driverName))
+            driverName = note.EffectiveDriverId.ToString("D");
+        var packName = $"{driverName} - {note.DeliveryDate:yyyy-MM-dd}";
 
-        // Step 9: Upsert delivery pack (create or update to Generating).
+        // Step 8: Upsert active delivery pack version (create or update to Generating).
         Guid packId;
 
         if (existingPack is not null)
@@ -195,28 +183,28 @@ public class GenerateDeliveryPack
         }
         else
         {
-            var (newPackId, created) = await _dataverse.CreateDeliveryPackAsync(note.RouteId, note.DeliveryDate, documentUrls.Length, packName, cancellationToken);
+            var (newPackId, created) = await _dataverse.CreateDeliveryPackAsync(note.EffectiveDriverId, note.DeliveryDate, documentUrls.Length, packName, cancellationToken);
             packId = newPackId;
             if (!created)
             {
                 _logger.LogInformation("Delivery pack {PackId} was created by a concurrent request. Skipping duplicate generation.", newPackId);
                 return new OkObjectResult(new { status = "skipped", reason = "already_generating", packId = newPackId });
             }
-            _logger.LogInformation("Created new delivery pack {PackId} for route {RouteId} on {Date}.", packId, note.RouteId, note.DeliveryDate.Date);
+            _logger.LogInformation("Created new delivery pack {PackId} for effective driver {DriverId} on {Date}.", packId, note.EffectiveDriverId, note.DeliveryDate.Date);
         }
 
         try
         {
-            // Step 10: Merge documents into a single PDF.
+            // Step 9: Merge documents into a single PDF.
             _logger.LogInformation("Merging {Count} delivery note documents for pack {PackId}.", documentUrls.Length, packId);
             var pdfBytes = await _mergeService.MergeDocumentsAsync(documentUrls, cancellationToken);
             _logger.LogInformation("Merge complete: {Size} bytes for pack {PackId}.", pdfBytes.Length, packId);
 
-            // Step 11: Upload merged PDF to SharePoint /DeliveryPacks/{RouteName}/
-            var sharePointUrl = await _sharePoint.UploadDeliveryPackAsync(routeName, note.DeliveryDate, pdfBytes, cancellationToken);
+            // Step 10: Upload merged PDF to SharePoint /DeliveryPacks/{DriverName}/
+            var sharePointUrl = await _sharePoint.UploadDeliveryPackAsync(driverName, note.DeliveryDate, pdfBytes, cancellationToken);
             _logger.LogInformation("Uploaded delivery pack PDF to {Url} for pack {PackId}.", sharePointUrl, packId);
 
-            // Step 12: Update delivery pack record to Complete.
+            // Step 11: Update delivery pack record to Complete.
             await _dataverse.UpdateDeliveryPackCompleteAsync(packId, sharePointUrl, documentUrls.Length, DateTimeOffset.UtcNow, cancellationToken);
             _logger.LogInformation("Delivery pack {PackId} marked Complete.", packId);
 
