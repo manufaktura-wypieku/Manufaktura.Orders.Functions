@@ -72,6 +72,14 @@ $env:DATAVERSE_URL = "https://manufaktura-develop.crm11.dynamics.com"
 dotnet test tests/Manufaktura.Orders.Functions.IntegrationTests --filter "Category=Smoke"
 ```
 
+PowerShell `$env:` values only apply to the terminal where they are set. If you run tests from VS Code Test Explorer or CodeLens, create `tests/Manufaktura.Orders.Functions.IntegrationTests/integration-tests.local.json` instead:
+
+```json
+{
+  "DATAVERSE_URL": "https://manufaktura-develop.crm11.dynamics.com"
+}
+```
+
 Optional local overrides are available for debugging a specific Function App without changing Dataverse configuration:
 
 ```powershell

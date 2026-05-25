@@ -7,6 +7,10 @@ namespace Manufaktura.Orders.Functions.IntegrationTests;
 
 public sealed class DataverseIntegrationFixture : IAsyncLifetime
 {
+    private const string LocalSettingsFileName = "integration-tests.local.json";
+
+    private static readonly Lazy<IReadOnlyDictionary<string, string>> LocalSettings = new(LoadLocalSettings);
+
     private readonly HttpClient _dataverseHttp = new();
     private readonly HttpClient _functionHttp = new();
     private readonly List<CreatedRecord> _createdRecords = [];
@@ -19,7 +23,7 @@ public sealed class DataverseIntegrationFixture : IAsyncLifetime
 
     public async ValueTask InitializeAsync()
     {
-        DataverseUrl = GetRequiredEnvironmentVariable("DATAVERSE_URL").TrimEnd('/');
+        DataverseUrl = GetRequiredConfigurationValue("DATAVERSE_URL").TrimEnd('/');
 
         var credential = new DefaultAzureCredential();
         Dataverse = new DataverseTestClient(_dataverseHttp, credential, DataverseUrl);
@@ -27,8 +31,8 @@ public sealed class DataverseIntegrationFixture : IAsyncLifetime
         var dataverseFunctionBaseUrl = await GetRequiredDataverseEnvironmentVariableAsync("mb_OrdersFunctionAppBaseUrl", CancellationToken.None);
         var dataverseFunctionKey = await GetRequiredDataverseEnvironmentVariableAsync("mb_OrdersFunctionAppKey", CancellationToken.None);
 
-        FunctionAppBaseUrl = GetOptionalEnvironmentVariable("FUNCTION_APP_BASE_URL") ?? dataverseFunctionBaseUrl;
-        FunctionAppKey = GetOptionalEnvironmentVariable("FUNCTION_APP_KEY") ?? dataverseFunctionKey;
+        FunctionAppBaseUrl = GetOptionalConfigurationValue("FUNCTION_APP_BASE_URL") ?? dataverseFunctionBaseUrl;
+        FunctionAppKey = GetOptionalConfigurationValue("FUNCTION_APP_KEY") ?? dataverseFunctionKey;
 
         _functionHttp.BaseAddress = new Uri($"{FunctionAppBaseUrl.TrimEnd('/')}/");
         _functionHttp.DefaultRequestHeaders.Add("x-functions-key", FunctionAppKey);
@@ -185,13 +189,64 @@ public sealed class DataverseIntegrationFixture : IAsyncLifetime
 
     private void Register(string entitySetName, Guid id) => _createdRecords.Add(new CreatedRecord(entitySetName, id));
 
-    private static string GetRequiredEnvironmentVariable(string name)
-        => Environment.GetEnvironmentVariable(name) is { Length: > 0 } value
-            ? value
-            : throw new InvalidOperationException($"{name} environment variable is required for Orders integration tests.");
+    private static string GetRequiredConfigurationValue(string name)
+        => GetOptionalConfigurationValue(name)
+            ?? throw new InvalidOperationException(
+                $"{name} is required for Orders integration tests. Set it as an environment variable in the same process that launches dotnet test, " +
+                $"or create {LocalSettingsFileName} in the integration test project folder. Environment variables set with $env: only apply to that PowerShell terminal and are not inherited by VS Code Test Explorer.");
 
-    private static string? GetOptionalEnvironmentVariable(string name)
-        => Environment.GetEnvironmentVariable(name) is { Length: > 0 } value ? value : null;
+    private static string? GetOptionalConfigurationValue(string name)
+    {
+        if (Environment.GetEnvironmentVariable(name) is { Length: > 0 } environmentValue)
+            return environmentValue;
+
+        if (AppContext.GetData(name) is string appContextValue && !string.IsNullOrWhiteSpace(appContextValue))
+            return appContextValue;
+
+        return LocalSettings.Value.TryGetValue(name, out var localValue) && !string.IsNullOrWhiteSpace(localValue)
+            ? localValue
+            : null;
+    }
+
+    private static IReadOnlyDictionary<string, string> LoadLocalSettings()
+    {
+        var path = FindLocalSettingsPath();
+        if (path is null)
+            return new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        using var document = JsonDocument.Parse(File.ReadAllText(path));
+        var settings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var property in document.RootElement.EnumerateObject())
+        {
+            if (property.Value.ValueKind == JsonValueKind.String &&
+                !string.IsNullOrWhiteSpace(property.Value.GetString()))
+            {
+                settings[property.Name] = property.Value.GetString()!;
+            }
+        }
+
+        return settings;
+    }
+
+    private static string? FindLocalSettingsPath()
+    {
+        var searchedDirectories = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var startDirectory in new[] { AppContext.BaseDirectory, Directory.GetCurrentDirectory() })
+        {
+            var directory = new DirectoryInfo(startDirectory);
+            while (directory is not null && searchedDirectories.Add(directory.FullName))
+            {
+                var candidate = Path.Combine(directory.FullName, LocalSettingsFileName);
+                if (File.Exists(candidate))
+                    return candidate;
+
+                directory = directory.Parent;
+            }
+        }
+
+        return null;
+    }
 
     private static string GetWeekdayDriverNavigationProperty(DayOfWeek dayOfWeek)
         => dayOfWeek switch
