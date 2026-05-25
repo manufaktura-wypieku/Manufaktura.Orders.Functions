@@ -1,0 +1,56 @@
+name: Integration Tests
+
+on:
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: "GitHub environment to test"
+        required: true
+        default: dev
+        type: choice
+        options:
+          - dev
+          - test
+      category:
+        description: "Integration test category"
+        required: true
+        default: Smoke
+        type: choice
+        options:
+          - Smoke
+          - E2E
+
+permissions:
+  contents: read
+  id-token: write
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  INT_TEST_PROJECT: "tests/Manufaktura.Orders.Functions.IntegrationTests/Manufaktura.Orders.Functions.IntegrationTests.csproj"
+
+jobs:
+  integration-tests:
+    runs-on: ubuntu-latest
+    environment: ${{ github.event.inputs.environment }}
+    concurrency:
+      group: orders-integration-${{ github.event.inputs.environment }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run integration tests
+        env:
+          DATAVERSE_URL: ${{ vars.DATAVERSE_URL }}
+        run: dotnet test ${{ env.INT_TEST_PROJECT }} --configuration Release --filter "Category=${{ github.event.inputs.category }}" --verbosity normal
