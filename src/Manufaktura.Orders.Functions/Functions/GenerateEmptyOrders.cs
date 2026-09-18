@@ -10,10 +10,14 @@ public class GenerateEmptyOrders
     private readonly TimeProvider _clock;
     private readonly ILogger<GenerateEmptyOrders> _logger;
 
-    public GenerateEmptyOrders(IDataverseService dataverse, TimeProvider clock, ILoggerFactory loggerFactory)
+    public GenerateEmptyOrders(
+        IDataverseService dataverse,
+        TimeProvider clock,
+        ILogger<GenerateEmptyOrders> logger,
+        ILogger<EmptyOrderGenerator> generatorLogger)
     {
-        _logger = loggerFactory.CreateLogger<GenerateEmptyOrders>();
-        _generator = new EmptyOrderGenerator(dataverse, loggerFactory.CreateLogger<EmptyOrderGenerator>());
+        _logger = logger;
+        _generator = new EmptyOrderGenerator(dataverse, generatorLogger);
         _clock = clock;
     }
 

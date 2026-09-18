@@ -39,9 +39,11 @@ internal static class EmptyOrderSchedule
             }
             catch (TimeZoneNotFoundException)
             {
+                continue;
             }
             catch (InvalidTimeZoneException)
             {
+                continue;
             }
         }
 
