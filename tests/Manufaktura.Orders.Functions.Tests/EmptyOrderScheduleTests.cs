@@ -77,4 +77,22 @@ public class EmptyOrderScheduleTests
 
         Assert.True(EmptyOrderSchedule.ShouldRun(late, pastDue: false));
     }
+
+    [Fact]
+    public void DelayedWinterOneAmUtc_DoesNotRun()
+    {
+        var late = new DateTimeOffset(2026, 1, 15, 1, 5, 0, TimeSpan.Zero);
+
+        Assert.False(EmptyOrderSchedule.ShouldRun(late, pastDue: false));
+        Assert.False(EmptyOrderSchedule.ShouldRun(late, pastDue: true));
+    }
+
+    [Fact]
+    public void DelayedSummerTwoAmUtc_RunsOnlyWhenPastDue()
+    {
+        var late = new DateTimeOffset(2026, 7, 15, 2, 5, 0, TimeSpan.Zero);
+
+        Assert.False(EmptyOrderSchedule.ShouldRun(late, pastDue: false));
+        Assert.True(EmptyOrderSchedule.ShouldRun(late, pastDue: true));
+    }
 }

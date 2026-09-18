@@ -36,9 +36,13 @@ public sealed class EmptyOrderGenerator
         var alreadyPresent = 0;
         var missingPriceList = 0;
         var failed = 0;
+        var seen = new HashSet<Guid>();
 
         foreach (var account in accounts)
         {
+            if (!seen.Add(account.AccountId))
+                continue;
+
             var accountName = string.IsNullOrWhiteSpace(account.Name)
                 ? account.AccountId.ToString("D")
                 : account.Name;

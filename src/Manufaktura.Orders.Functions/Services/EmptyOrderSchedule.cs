@@ -21,8 +21,9 @@ internal static class EmptyOrderSchedule
         if (pastDue && localHour > 2)
             return true;
 
-        // The timer fires at 01:00 and 02:00 UTC. Any other invocation is a same-day retry from Azure.
-        var isScheduledTick = utcNow.Minute == 0 && utcNow.Hour is 1 or 2;
+        // The timer is due at 01:00 and 02:00 UTC. A late tick in those hours is still that
+        // schedule, not a manual retry, even when the minute is no longer 0.
+        var isScheduledTick = utcNow.Hour is 1 or 2;
         return !isScheduledTick;
     }
 

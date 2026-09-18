@@ -75,6 +75,18 @@ public class EmptyOrderGeneratorTests
     }
 
     [Fact]
+    public async Task CreatesOnlyOnceWhenTheSameAccountIsListedTwice()
+    {
+        var bakery = new EmptyOrderAccount(BakeryId, "The Bakery", PriceListId);
+        _dataverse.ListActiveAccountsForDeliveryDateAsync(Today, Arg.Any<CancellationToken>())
+            .Returns([bakery, bakery]);
+
+        await _generator.GenerateAsync(Today);
+
+        await _dataverse.Received(1).CreateEmptyOrderAsync(BakeryId, PriceListId, Today, Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
     public async Task ContinuesAfterACreateFailure_ThenFailsTheRun()
     {
         _dataverse.ListActiveAccountsForDeliveryDateAsync(Today, Arg.Any<CancellationToken>())
