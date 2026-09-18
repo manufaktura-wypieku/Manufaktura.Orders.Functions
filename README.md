@@ -97,6 +97,8 @@ $env:E2E_FLOW_TIMEOUT_SECONDS = "120"
 $env:E2E_PACK_TIMEOUT_SECONDS = "60"
 ```
 
+Known workaround: order deactivation E2E tests wait for generated order items to have `mb_quantity`, `mb_priceunit`, and `mb_value` before deactivating the order. This is intentionally a temporary guard around asynchronous Power Automate order-item generation; without it, the Delivery Note document flow can read partially-calculated rows and fail `formatNumber(null)`. Long term, order item generation should be fixed so document generation cannot observe half-built order items.
+
 Do not run write integration tests against production. Dev/test runs create uniquely named `[E2E]` records and clean them up on a best-effort basis.
 
 ## Deployment
