@@ -41,6 +41,7 @@ public class ApplyCoverPlanTests
         var conflict = Assert.IsType<ConflictObjectResult>(result);
         using var doc = JsonDocument.Parse(JsonSerializer.Serialize(conflict.Value));
         Assert.Equal("overlapping_cover", doc.RootElement.GetProperty("code").GetString());
+        Assert.Equal(1, doc.RootElement.GetProperty("conflictingAccountCount").GetInt32());
         await _dataverse.DidNotReceive().CreateAccountDeliveryOverrideAsync(Arg.Any<Guid>(), Arg.Any<Guid>(), Arg.Any<DateOnly>(), Arg.Any<DateOnly>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
         await _refresher.DidNotReceive().RefreshAsync(Arg.Any<RefreshEffectiveDriversRequest>(), Arg.Any<CancellationToken>());
     }

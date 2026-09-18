@@ -68,7 +68,7 @@ public class ApplyCoverPlan
                 {
                     error = $"{conflictingAccountIds.Length} selected account{(conflictingAccountIds.Length == 1 ? " has" : "s have")} overlapping cover.",
                     code = "overlapping_cover",
-                    conflictingAccounts = conflictingAccountIds.Length
+                    conflictingAccountCount = conflictingAccountIds.Length
                 });
             }
 
