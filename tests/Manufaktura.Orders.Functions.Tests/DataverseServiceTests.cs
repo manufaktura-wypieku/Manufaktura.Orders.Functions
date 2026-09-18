@@ -194,4 +194,71 @@ public class DataverseServiceTests
         Assert.Equal(noteId, ex.DeliveryNoteId);
         Assert.Contains("has no delivery route assigned", ex.Message);
     }
+
+    [Fact]
+    public async Task ListActiveAccounts_FiltersByOrderOnDaysValue_AndFollowsNextLink()
+    {
+        var thursday = new DateOnly(2026, 9, 17);
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(OkJson("""
+            {
+              "value":[{"accountid":"11111111-1111-1111-1111-111111111111","name":"The Bakery","_mb_pricelist_value":"33333333-3333-3333-3333-333333333333"}],
+              "@odata.nextLink":"https://org.crm/accounts-page-2"
+            }
+            """));
+        handler.Enqueue(OkJson("""
+            {"value":[{"accountid":"22222222-2222-2222-2222-222222222222","name":null,"_mb_pricelist_value":null}]}
+            """));
+
+        var service = CreateService(handler);
+        var accounts = await service.ListActiveAccountsForDeliveryDateAsync(thursday);
+
+        Assert.Equal(2, accounts.Count);
+        Assert.Equal("The Bakery", accounts[0].Name);
+        Assert.Equal(Guid.Parse("33333333-3333-3333-3333-333333333333"), accounts[0].PriceListId);
+        Assert.Null(accounts[1].PriceListId);
+        Assert.Equal("https://org.crm/accounts-page-2", handler.SentRequests[1].Url);
+
+        var decodedUrl = Uri.UnescapeDataString(handler.SentRequests[0].Url);
+        Assert.Contains("statecode eq 0", decodedUrl);
+        Assert.Contains("PropertyValues=['7']", decodedUrl);
+    }
+
+    [Fact]
+    public async Task ListAccountIdsWithOrder_DoesNotFilterByState_AndUsesDeliveryDateWindow()
+    {
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(OkJson("""
+            {"value":[{"_mb_customer_value":"11111111-1111-1111-1111-111111111111"},{"_mb_customer_value":null}]}
+            """));
+
+        var service = CreateService(handler);
+        var ids = await service.ListAccountIdsWithOrderOnDateAsync(new DateOnly(2026, 9, 18));
+
+        Assert.Equal([Guid.Parse("11111111-1111-1111-1111-111111111111")], ids);
+        var decodedUrl = Uri.UnescapeDataString(handler.SentRequests[0].Url);
+        Assert.Contains("mb_orders", decodedUrl);
+        Assert.Contains("2026-09-18T00:00:00Z", decodedUrl);
+        Assert.Contains("2026-09-19T00:00:00Z", decodedUrl);
+        Assert.DoesNotContain("statecode", decodedUrl);
+    }
+
+    [Fact]
+    public async Task CreateEmptyOrder_BindsAccountPriceListAndDeliveryDate()
+    {
+        var accountId = Guid.Parse("11111111-1111-1111-1111-111111111111");
+        var priceListId = Guid.Parse("33333333-3333-3333-3333-333333333333");
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.NoContent));
+
+        var service = CreateService(handler);
+        await service.CreateEmptyOrderAsync(accountId, priceListId, new DateOnly(2026, 9, 18));
+
+        var request = handler.SentRequests[0];
+        Assert.Equal(HttpMethod.Post, request.Method);
+        Assert.Contains("/api/data/v9.2/mb_orders", request.Url);
+        Assert.Contains("\"mb_deliverydate\":\"2026-09-18\"", request.Body);
+        Assert.Contains($"\"mb_Customer_account@odata.bind\":\"/accounts({accountId:D})\"", request.Body);
+        Assert.Contains($"\"mb_Pricelist@odata.bind\":\"/mb_pricelists({priceListId:D})\"", request.Body);
+    }
 }

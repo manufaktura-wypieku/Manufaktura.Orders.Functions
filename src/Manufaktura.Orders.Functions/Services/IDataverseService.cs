@@ -69,4 +69,19 @@ public interface IDataverseService
     /// Updates the delivery pack to Failed status and records the error log.
     /// </summary>
     Task UpdateDeliveryPackFailedAsync(Guid packId, string log, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Active accounts whose Order on days includes the weekday of <paramref name="deliveryDate"/>.
+    /// </summary>
+    Task<IReadOnlyList<EmptyOrderAccount>> ListActiveAccountsForDeliveryDateAsync(DateOnly deliveryDate, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Account ids that already have an order on <paramref name="deliveryDate"/>, active or inactive.
+    /// </summary>
+    Task<IReadOnlySet<Guid>> ListAccountIdsWithOrderOnDateAsync(DateOnly deliveryDate, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates an empty order for an account. Does not create order lines.
+    /// </summary>
+    Task CreateEmptyOrderAsync(Guid accountId, Guid priceListId, DateOnly deliveryDate, CancellationToken cancellationToken = default);
 }
