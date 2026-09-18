@@ -10,11 +10,11 @@ public class GenerateEmptyOrders
     private readonly TimeProvider _clock;
     private readonly ILogger<GenerateEmptyOrders> _logger;
 
-    public GenerateEmptyOrders(IDataverseService dataverse, TimeProvider clock, ILogger<GenerateEmptyOrders> logger)
+    public GenerateEmptyOrders(IDataverseService dataverse, TimeProvider clock, ILoggerFactory loggerFactory)
     {
-        _generator = new EmptyOrderGenerator(dataverse, logger);
+        _logger = loggerFactory.CreateLogger<GenerateEmptyOrders>();
+        _generator = new EmptyOrderGenerator(dataverse, loggerFactory.CreateLogger<EmptyOrderGenerator>());
         _clock = clock;
-        _logger = logger;
     }
 
     // 01:00 UTC is 02:00 during British Summer Time. 02:00 UTC is 02:00 during Greenwich Mean Time.
@@ -25,7 +25,7 @@ public class GenerateEmptyOrders
         var now = _clock.GetUtcNow();
         if (!EmptyOrderSchedule.ShouldRun(now, timer.IsPastDue))
         {
-            var local = TimeZoneInfo.ConvertTime(now, TimeZoneInfo.FindSystemTimeZoneById("Europe/London"));
+            var local = EmptyOrderSchedule.UkLocal(now);
             _logger.LogInformation("Skipped scheduled empty-order run. UK local time is {LocalTime}.", local);
             return;
         }

@@ -7,11 +7,14 @@ namespace Manufaktura.Orders.Functions.Services;
 /// </summary>
 internal static class EmptyOrderSchedule
 {
-    private static readonly TimeZoneInfo London = TimeZoneInfo.FindSystemTimeZoneById("Europe/London");
+    private static readonly TimeZoneInfo London = ResolveLondon();
+
+    public static DateTimeOffset UkLocal(DateTimeOffset utcNow)
+        => TimeZoneInfo.ConvertTime(utcNow, London);
 
     public static bool ShouldRun(DateTimeOffset utcNow, bool pastDue)
     {
-        var localHour = TimeZoneInfo.ConvertTime(utcNow, London).Hour;
+        var localHour = UkLocal(utcNow).Hour;
         if (localHour == 2)
             return true;
 
@@ -24,5 +27,24 @@ internal static class EmptyOrderSchedule
     }
 
     public static DateOnly UkDate(DateTimeOffset utcNow)
-        => DateOnly.FromDateTime(TimeZoneInfo.ConvertTime(utcNow, London).DateTime);
+        => DateOnly.FromDateTime(UkLocal(utcNow).DateTime);
+
+    private static TimeZoneInfo ResolveLondon()
+    {
+        foreach (var id in new[] { "Europe/London", "GMT Standard Time" })
+        {
+            try
+            {
+                return TimeZoneInfo.FindSystemTimeZoneById(id);
+            }
+            catch (TimeZoneNotFoundException)
+            {
+            }
+            catch (InvalidTimeZoneException)
+            {
+            }
+        }
+
+        throw new TimeZoneNotFoundException("Neither Europe/London nor GMT Standard Time is available.");
+    }
 }
