@@ -32,6 +32,7 @@ builder.Logging.Services.Configure<LoggerFilterOptions>(options =>
     options.Rules.Add(new LoggerFilterRule(applicationInsightsProvider, "Manufaktura.Orders.Functions", LogLevel.Information, null));
 });
 
+builder.Services.AddSingleton<TimeProvider>(TimeProvider.System);
 builder.Services.AddSingleton<DefaultAzureCredential>();
 builder.Services.AddSingleton<TokenCredential>(sp => sp.GetRequiredService<DefaultAzureCredential>());
 builder.Services.AddHttpClient<IDocumentMergeService, DocumentMergeService>();
