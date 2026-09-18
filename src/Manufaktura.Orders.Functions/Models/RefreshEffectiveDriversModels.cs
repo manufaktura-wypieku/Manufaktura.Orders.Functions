@@ -9,6 +9,7 @@ public class RefreshEffectiveDriversRequest
     public DateOnly? FromDate { get; init; }
     public DateOnly? ToDate { get; init; }
     public int? MaxOrders { get; init; }
+    public Guid[]? AccountIds { get; init; }
 }
 
 public record EffectiveDriverRefreshQuery(
@@ -17,14 +18,17 @@ public record EffectiveDriverRefreshQuery(
     Guid? AccountId,
     Guid? RouteId,
     Guid? DriverId,
-    int MaxOrders);
+    int MaxOrders,
+    IReadOnlyCollection<Guid>? AccountIds = null);
 
 public record RefreshEffectiveDriversResponse(
     string Status,
     int MatchedOrders,
     int UpdatedOrders,
     int UncoveredOrders,
-    IReadOnlyCollection<RefreshEffectiveDriverOrderResult> Results);
+    IReadOnlyCollection<RefreshEffectiveDriverOrderResult> Results,
+    int DeliveryPacksRegenerated = 0,
+    int LockedPacksRequiringReview = 0);
 
 public record RefreshEffectiveDriverOrderResult(
     Guid OrderId,
@@ -32,4 +36,7 @@ public record RefreshEffectiveDriverOrderResult(
     Guid? DriverId,
     string? Source,
     bool IsUncovered,
-    string? Error);
+    string? Error,
+    int DeliveryPacksRegenerated = 0,
+    int LockedPacksRequiringReview = 0,
+    IReadOnlyList<string>? Warnings = null);

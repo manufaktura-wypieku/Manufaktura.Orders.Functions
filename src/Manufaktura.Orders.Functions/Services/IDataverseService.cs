@@ -14,6 +14,20 @@ public interface IDataverseService
     /// </summary>
     Task<IReadOnlyCollection<Guid>> GetOrderIdsForEffectiveDriverRefreshAsync(EffectiveDriverRefreshQuery query, CancellationToken cancellationToken = default);
 
+    Task<IReadOnlyCollection<Guid>> GetEffectiveDriverRefreshOrderPageAsync(EffectiveDriverRefreshQuery query, int page, CancellationToken cancellationToken = default);
+
+    Task<OrderDeliverySnapshot> GetOrderDeliverySnapshotAsync(Guid orderId, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyCollection<AccountDeliveryOverrideRecord>> GetOverlappingAccountDeliveryOverridesAsync(IReadOnlyCollection<Guid> accountIds, DateOnly fromDate, DateOnly toDate, CancellationToken cancellationToken = default);
+
+    Task CreateAccountDeliveryOverrideAsync(Guid accountId, Guid driverId, DateOnly fromDate, DateOnly toDate, string name, CancellationToken cancellationToken = default);
+
+    Task DeleteDeliveryPackAsync(Guid packId, CancellationToken cancellationToken = default);
+
+    Task<IReadOnlyCollection<Guid>> GetLockedDeliveryPackIdsAsync(Guid effectiveDriverId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default);
+
+    Task AppendDeliveryPackLogAsync(Guid packId, string message, CancellationToken cancellationToken = default);
+
     /// <summary>
     /// Persists the home delivery route, effective driver, and source on an order.
     /// </summary>

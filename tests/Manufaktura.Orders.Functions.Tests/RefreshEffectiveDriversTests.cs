@@ -24,11 +24,19 @@ public class RefreshEffectiveDriversTests
 
     private readonly IDataverseService _dataverse = Substitute.For<IDataverseService>();
     private readonly IEffectiveDriverResolver _resolver = Substitute.For<IEffectiveDriverResolver>();
+    private readonly IDeliveryPackRegenerator _regenerator = Substitute.For<IDeliveryPackRegenerator>();
     private readonly RefreshEffectiveDrivers _function;
 
     public RefreshEffectiveDriversTests()
     {
-        _function = new RefreshEffectiveDrivers(_dataverse, _resolver, Substitute.For<ILogger<RefreshEffectiveDrivers>>());
+        _dataverse.GetOrderDeliverySnapshotAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+            .Returns(new OrderDeliverySnapshot(null, DeliveryDate, false));
+        var refresh = new EffectiveDriverRefreshService(
+            _dataverse,
+            _resolver,
+            _regenerator,
+            Substitute.For<ILogger<EffectiveDriverRefreshService>>());
+        _function = new RefreshEffectiveDrivers(refresh, Substitute.For<ILogger<RefreshEffectiveDrivers>>());
     }
 
     [Theory]
@@ -130,7 +138,7 @@ public class RefreshEffectiveDriversTests
     [Fact]
     public async Task KeepsRefreshingWhenOneOrderHasInvalidContext()
     {
-        _dataverse.GetOrderIdsForEffectiveDriverRefreshAsync(Arg.Any<EffectiveDriverRefreshQuery>(), Arg.Any<CancellationToken>())
+        _dataverse.GetEffectiveDriverRefreshOrderPageAsync(Arg.Any<EffectiveDriverRefreshQuery>(), 1, Arg.Any<CancellationToken>())
             .Returns([OrderId]);
         _dataverse.GetEffectiveDriverResolutionRequestForOrderAsync(OrderId, Arg.Any<CancellationToken>())
             .ThrowsAsync(new InvalidOperationException("Order has no delivery route assigned."));
@@ -155,7 +163,7 @@ public class RefreshEffectiveDriversTests
     {
         var secondRequest = CreateResolutionRequest();
         var secondResolution = new EffectiveDriverResolutionResult(DriverId, EffectiveDriverSource.RouteWeekday);
-        _dataverse.GetOrderIdsForEffectiveDriverRefreshAsync(Arg.Any<EffectiveDriverRefreshQuery>(), Arg.Any<CancellationToken>())
+        _dataverse.GetEffectiveDriverRefreshOrderPageAsync(Arg.Any<EffectiveDriverRefreshQuery>(), 1, Arg.Any<CancellationToken>())
             .Returns([OrderId, SecondOrderId]);
         _dataverse.GetEffectiveDriverResolutionRequestForOrderAsync(OrderId, Arg.Any<CancellationToken>())
             .ThrowsAsync(new HttpRequestException("Not found", null, HttpStatusCode.NotFound));
@@ -185,7 +193,7 @@ public class RefreshEffectiveDriversTests
     [Fact]
     public async Task ReturnsBadGatewayOnUpstreamAuthFailure()
     {
-        _dataverse.GetOrderIdsForEffectiveDriverRefreshAsync(Arg.Any<EffectiveDriverRefreshQuery>(), Arg.Any<CancellationToken>())
+        _dataverse.GetEffectiveDriverRefreshOrderPageAsync(Arg.Any<EffectiveDriverRefreshQuery>(), 1, Arg.Any<CancellationToken>())
             .ThrowsAsync(new HttpRequestException("Denied", null, HttpStatusCode.Forbidden));
 
         var request = CreateHttpRequest(new { fromDate = DeliveryDate });
@@ -195,6 +203,75 @@ public class RefreshEffectiveDriversTests
         var error = Assert.IsType<ObjectResult>(result);
         Assert.Equal(StatusCodes.Status502BadGateway, error.StatusCode);
         AssertErrorCode(error.Value, "upstream_auth_failure");
+    }
+
+    [Fact]
+    public async Task PagesUntilEveryMatchingOrderIsRefreshedWhenMaxOrdersIsOmitted()
+    {
+        var firstPage = Enumerable.Range(0, EffectiveDriverRefreshService.PageSize).Select(_ => Guid.NewGuid()).ToArray();
+        var lastOrderId = Guid.Parse("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa");
+        var resolutionRequest = CreateResolutionRequest();
+        var resolution = new EffectiveDriverResolutionResult(DriverId, EffectiveDriverSource.RouteWeekday);
+        _dataverse.GetEffectiveDriverRefreshOrderPageAsync(Arg.Any<EffectiveDriverRefreshQuery>(), 1, Arg.Any<CancellationToken>())
+            .Returns(firstPage);
+        _dataverse.GetEffectiveDriverRefreshOrderPageAsync(Arg.Any<EffectiveDriverRefreshQuery>(), 2, Arg.Any<CancellationToken>())
+            .Returns([lastOrderId]);
+        _dataverse.GetEffectiveDriverResolutionRequestForOrderAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(resolutionRequest);
+        _resolver.Resolve(resolutionRequest).Returns(resolution);
+        _dataverse.UpdateOrderEffectiveDriverAsync(Arg.Any<Guid>(), RouteId, resolution, Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+
+        var result = await _function.Run(CreateHttpRequest(new { fromDate = DeliveryDate }), CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var response = Assert.IsType<RefreshEffectiveDriversResponse>(ok.Value);
+        Assert.Equal("complete", response.Status);
+        Assert.Equal(firstPage.Length + 1, response.MatchedOrders);
+        Assert.Equal(firstPage.Length + 1, response.UpdatedOrders);
+        await _dataverse.DidNotReceive().GetOrderIdsForEffectiveDriverRefreshAsync(Arg.Any<EffectiveDriverRefreshQuery>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task ReportsIncompleteWhenExplicitMaxOrdersTruncatesTheMatch()
+    {
+        var resolutionRequest = CreateResolutionRequest();
+        var resolution = new EffectiveDriverResolutionResult(DriverId, EffectiveDriverSource.RouteWeekday);
+        _dataverse.GetOrderIdsForEffectiveDriverRefreshAsync(Arg.Any<EffectiveDriverRefreshQuery>(), Arg.Any<CancellationToken>())
+            .Returns([OrderId, SecondOrderId]);
+        _dataverse.GetEffectiveDriverResolutionRequestForOrderAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>()).Returns(resolutionRequest);
+        _resolver.Resolve(resolutionRequest).Returns(resolution);
+        _dataverse.UpdateOrderEffectiveDriverAsync(Arg.Any<Guid>(), RouteId, resolution, Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+
+        var result = await _function.Run(CreateHttpRequest(new { fromDate = DeliveryDate, maxOrders = 2 }), CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var response = Assert.IsType<RefreshEffectiveDriversResponse>(ok.Value);
+        Assert.Equal("incomplete", response.Status);
+        Assert.Equal(2, response.UpdatedOrders);
+    }
+
+    [Fact]
+    public async Task RegeneratesPacksWhenTheOrderAlreadyHasDeliveryNotes()
+    {
+        var previousDriverId = Guid.Parse("66666666-6666-6666-6666-666666666666");
+        var resolutionRequest = CreateResolutionRequest();
+        var resolution = new EffectiveDriverResolutionResult(DriverId, EffectiveDriverSource.AccountOverride);
+        _dataverse.GetOrderDeliverySnapshotAsync(OrderId, Arg.Any<CancellationToken>())
+            .Returns(new OrderDeliverySnapshot(previousDriverId, DeliveryDate, true));
+        _dataverse.GetEffectiveDriverResolutionRequestForOrderAsync(OrderId, Arg.Any<CancellationToken>()).Returns(resolutionRequest);
+        _resolver.Resolve(resolutionRequest).Returns(resolution);
+        _dataverse.UpdateOrderEffectiveDriverAsync(OrderId, RouteId, resolution, Arg.Any<CancellationToken>()).Returns(Task.CompletedTask);
+        _regenerator.RegenerateAsync(previousDriverId, DriverId, DeliveryDate, Arg.Any<CancellationToken>())
+            .Returns(new DeliveryPackRegenerationResult(2, 1, ["Delivery pack could not be rebuilt."]));
+
+        var result = await _function.Run(CreateHttpRequest(new { orderId = OrderId }), CancellationToken.None);
+
+        var ok = Assert.IsType<OkObjectResult>(result);
+        var response = Assert.IsType<RefreshEffectiveDriversResponse>(ok.Value);
+        Assert.Equal(2, response.DeliveryPacksRegenerated);
+        Assert.Equal(1, response.LockedPacksRequiringReview);
+        var orderResult = Assert.Single(response.Results);
+        Assert.Equal("updated", orderResult.Status);
+        Assert.Contains("could not be rebuilt", Assert.Single(orderResult.Warnings!));
     }
 
     private static EffectiveDriverResolutionRequest CreateResolutionRequest()
