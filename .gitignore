@@ -45,3 +45,6 @@ Thumbs.db
 ## Test results
 TestResults/
 coverage/
+
+## Local integration test settings
+tests/Manufaktura.Orders.Functions.IntegrationTests/integration-tests.local.json

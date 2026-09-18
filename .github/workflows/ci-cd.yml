@@ -15,6 +15,7 @@ env:
   DOTNET_VERSION: "10.0.x"
   FUNCTION_PROJECT: "src/Manufaktura.Orders.Functions/Manufaktura.Orders.Functions.csproj"
   TEST_PROJECT: "tests/Manufaktura.Orders.Functions.Tests/Manufaktura.Orders.Functions.Tests.csproj"
+  INT_TEST_PROJECT: "tests/Manufaktura.Orders.Functions.IntegrationTests/Manufaktura.Orders.Functions.IntegrationTests.csproj"
 
 jobs:
   build-and-test:
@@ -72,7 +73,7 @@ jobs:
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
   deploy-test:
-    needs: deploy-dev
+    needs: integration-test-dev
     permissions:
       id-token: write
       contents: read
@@ -86,8 +87,68 @@ jobs:
       AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
       AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
 
-  approve-prod:
+  integration-test-dev:
+    needs: deploy-dev
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    environment: dev
+    concurrency:
+      group: orders-integration-dev
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run smoke integration tests
+        env:
+          DATAVERSE_URL: ${{ vars.DATAVERSE_URL }}
+        run: dotnet test ${{ env.INT_TEST_PROJECT }} --configuration Release --filter "Category=Smoke" --verbosity normal
+
+  integration-test-test:
     needs: deploy-test
+    runs-on: ubuntu-latest
+    permissions:
+      id-token: write
+      contents: read
+    environment: test
+    concurrency:
+      group: orders-integration-test
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Azure Login (OIDC)
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Run smoke integration tests
+        env:
+          DATAVERSE_URL: ${{ vars.DATAVERSE_URL }}
+        run: dotnet test ${{ env.INT_TEST_PROJECT }} --configuration Release --filter "Category=Smoke" --verbosity normal
+
+  approve-prod:
+    needs: integration-test-test
     runs-on: ubuntu-latest
     permissions:
       issues: write

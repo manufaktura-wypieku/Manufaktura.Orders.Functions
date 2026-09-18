@@ -3,6 +3,9 @@ name: CI
 on:
   pull_request:
     branches: [main]
+    types: [opened, synchronize, reopened]
+  push:
+    branches: [main]
 
 permissions:
   contents: read
@@ -11,6 +14,10 @@ env:
   DOTNET_VERSION: "10.0.x"
   FUNCTION_PROJECT: "src/Manufaktura.Orders.Functions/Manufaktura.Orders.Functions.csproj"
   TEST_PROJECT: "tests/Manufaktura.Orders.Functions.Tests/Manufaktura.Orders.Functions.Tests.csproj"
+  DEV_RESOURCE_GROUP: "rg-manufaktura-orders-dev"
+  DEV_BICEP_PARAMETERS: "infra/main.dev.bicepparam"
+  FUNCTION_PACKAGE_ARTIFACT: "function-package"
+  FUNCTION_PACKAGE_PATH: "function-package.zip"
 
 jobs:
   build-and-test:
@@ -31,3 +38,216 @@ jobs:
 
       - name: Test
         run: dotnet test ${{ env.TEST_PROJECT }} --configuration Release --verbosity normal
+
+      - name: Publish function app
+        run: dotnet publish ${{ env.FUNCTION_PROJECT }} --configuration Release --no-restore --output ${{ runner.temp }}/function-publish
+
+      - name: Package function app
+        run: |
+          cd "${{ runner.temp }}/function-publish"
+          zip -qr "${{ github.workspace }}/${{ env.FUNCTION_PACKAGE_PATH }}" .
+
+      - name: Upload function package
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ env.FUNCTION_PACKAGE_ARTIFACT }}
+          path: ${{ env.FUNCTION_PACKAGE_PATH }}
+          if-no-files-found: error
+          retention-days: 7
+
+  deploy-dev:
+    name: Deploy to dev
+    runs-on: ubuntu-latest
+    needs: build-and-test
+    if: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository) }}
+    environment: dev
+    concurrency:
+      group: dev-functionapp
+      cancel-in-progress: true
+    permissions:
+      contents: read
+      id-token: write
+      issues: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Download function package
+        uses: actions/download-artifact@v4
+        with:
+          name: ${{ env.FUNCTION_PACKAGE_ARTIFACT }}
+
+      - name: Azure login
+        uses: azure/login@v2
+        with:
+          client-id: ${{ secrets.AZURE_CLIENT_ID }}
+          tenant-id: ${{ secrets.AZURE_TENANT_ID }}
+          subscription-id: ${{ secrets.AZURE_SUBSCRIPTION_ID }}
+
+      - name: Deploy dev infrastructure
+        id: deploy_infra
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          outputs=$(az deployment group create \
+            --resource-group "${{ env.DEV_RESOURCE_GROUP }}" \
+            --template-file infra/main.bicep \
+            --parameters "${{ env.DEV_BICEP_PARAMETERS }}" \
+            --name "dev-${GITHUB_RUN_ID}-${GITHUB_RUN_ATTEMPT}" \
+            --query "properties.outputs" \
+            --output json)
+
+          function_app_name=$(jq -r '.functionAppName.value' <<< "$outputs")
+          function_app_hostname=$(jq -r '.functionAppHostname.value' <<< "$outputs")
+
+          if [[ -z "$function_app_name" || "$function_app_name" == "null" ]]; then
+            echo "Bicep deployment did not return functionAppName." >&2
+            exit 1
+          fi
+
+          if [[ -z "$function_app_hostname" || "$function_app_hostname" == "null" ]]; then
+            echo "Bicep deployment did not return functionAppHostname." >&2
+            exit 1
+          fi
+
+          echo "function_app_name=$function_app_name" >> "$GITHUB_OUTPUT"
+          echo "function_app_hostname=$function_app_hostname" >> "$GITHUB_OUTPUT"
+
+      - name: Deploy function package
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          set +e
+          deploy_output=$(az functionapp deployment source config-zip \
+            --resource-group "${{ env.DEV_RESOURCE_GROUP }}" \
+            --name "${{ steps.deploy_infra.outputs.function_app_name }}" \
+            --src "${{ env.FUNCTION_PACKAGE_PATH }}" 2>&1)
+          deploy_exit=$?
+          set -e
+
+          echo "$deploy_output"
+          if [[ "$deploy_exit" -ne 0 && "$deploy_output" != *"Deployment was partially successful"* ]]; then
+            exit "$deploy_exit"
+          fi
+
+          if [[ "$deploy_exit" -ne 0 ]]; then
+            echo "::warning::Azure Functions Flex Consumption reported a partial deployment. Verifying synced functions before smoke testing."
+          fi
+
+          unzip -p "${{ env.FUNCTION_PACKAGE_PATH }}" functions.metadata \
+            | jq -r '.[].name' \
+            | sort > "${RUNNER_TEMP}/expected-functions.txt"
+
+          az functionapp function list \
+            --resource-group "${{ env.DEV_RESOURCE_GROUP }}" \
+            --name "${{ steps.deploy_infra.outputs.function_app_name }}" \
+            --query "[].name" \
+            --output tsv \
+            | sed 's#.*/##' \
+            | sort > "${RUNNER_TEMP}/actual-functions.txt"
+
+          missing_functions=$(comm -23 "${RUNNER_TEMP}/expected-functions.txt" "${RUNNER_TEMP}/actual-functions.txt")
+          if [[ -n "$missing_functions" ]]; then
+            echo "Deployment did not sync all expected functions:" >&2
+            echo "$missing_functions" >&2
+            exit 1
+          fi
+
+      - name: Smoke test deployed function
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          host_key=$(az functionapp keys list \
+            --resource-group "${{ env.DEV_RESOURCE_GROUP }}" \
+            --name "${{ steps.deploy_infra.outputs.function_app_name }}" \
+            --query "functionKeys.default" \
+            --output tsv)
+
+          if [[ -z "$host_key" ]]; then
+            echo "Could not retrieve the default Function host key." >&2
+            exit 1
+          fi
+
+          echo "::add-mask::$host_key"
+
+          response_file="${RUNNER_TEMP}/smoke-response.json"
+          status_code=$(curl --silent --show-error \
+            --output "$response_file" \
+            --write-out "%{http_code}" \
+            --request POST \
+            "https://${{ steps.deploy_infra.outputs.function_app_hostname }}/api/GenerateDeliveryPack?code=${host_key}" \
+            --header "Content-Type: application/json" \
+            --data "{}")
+
+          if [[ "$status_code" != "400" ]]; then
+            echo "Expected smoke test HTTP 400, got HTTP ${status_code}." >&2
+            cat "$response_file" >&2
+            exit 1
+          fi
+
+          if ! grep -q '"missing_delivery_note_id"' "$response_file"; then
+            echo "Smoke test response did not contain the expected validation code." >&2
+            cat "$response_file" >&2
+            exit 1
+          fi
+
+      - name: Update PR deployment comment
+        if: ${{ github.event_name == 'pull_request' }}
+        uses: actions/github-script@v7
+        env:
+          FUNCTION_APP_NAME: ${{ steps.deploy_infra.outputs.function_app_name }}
+          FUNCTION_APP_HOSTNAME: ${{ steps.deploy_infra.outputs.function_app_hostname }}
+        with:
+          script: |
+            const marker = '<!-- dev-deployment-comment -->';
+            const { owner, repo } = context.repo;
+            const issue_number = context.payload.pull_request.number;
+            const runUrl = `https://github.com/${owner}/${repo}/actions/runs/${process.env.GITHUB_RUN_ID}`;
+            const functionUrl = `https://${process.env.FUNCTION_APP_HOSTNAME}`;
+            const body = [
+              marker,
+              'Dev deployment is ready.',
+              '',
+              '| Item | Value |',
+              '| --- | --- |',
+              `| Function App | \`${process.env.FUNCTION_APP_NAME}\` |`,
+              `| URL | ${functionUrl} |`,
+              `| PR head SHA | \`${context.payload.pull_request.head.sha}\` |`,
+              `| Deployed revision | \`${process.env.GITHUB_SHA}\` |`,
+              `| Workflow run | [${process.env.GITHUB_RUN_ID}](${runUrl}) |`,
+              '',
+              'This is a shared dev environment. A newer PR or `main` deployment can overwrite it. Function keys are not posted here.'
+            ].join('\n');
+
+            try {
+              const comments = await github.rest.issues.listComments({
+                owner,
+                repo,
+                issue_number,
+                per_page: 100
+              });
+              const existing = comments.data.find(comment =>
+                comment.user?.type === 'Bot' && comment.body?.includes(marker)
+              );
+
+              if (existing) {
+                await github.rest.issues.updateComment({
+                  owner,
+                  repo,
+                  comment_id: existing.id,
+                  body
+                });
+              } else {
+                await github.rest.issues.createComment({
+                  owner,
+                  repo,
+                  issue_number,
+                  body
+                });
+              }
+            } catch (error) {
+              core.warning(`Dev deployment succeeded, but the PR comment could not be updated: ${error.message}`);
+            }
