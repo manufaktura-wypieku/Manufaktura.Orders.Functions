@@ -93,4 +93,20 @@ public interface IDataverseService
     /// Updates the delivery pack to Failed status and records the error log.
     /// </summary>
     Task UpdateDeliveryPackFailedAsync(Guid packId, string log, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Active accounts whose Order on days includes the weekday of <paramref name="deliveryDate"/>.
+    /// </summary>
+    Task<IReadOnlyList<EmptyOrderAccount>> ListActiveAccountsForDeliveryDateAsync(DateOnly deliveryDate, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Account ids that already have a sale order, or an order whose kind is null, on <paramref name="deliveryDate"/>, active or inactive.
+    /// A null kind is an order created before order kind existed and is treated as a sale order. A return order does not occupy the delivery date.
+    /// </summary>
+    Task<IReadOnlySet<Guid>> ListAccountIdsWithOrderOnDateAsync(DateOnly deliveryDate, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Creates an empty order for an account. Does not create order lines.
+    /// </summary>
+    Task CreateEmptyOrderAsync(Guid accountId, Guid priceListId, DateOnly deliveryDate, CancellationToken cancellationToken = default);
 }

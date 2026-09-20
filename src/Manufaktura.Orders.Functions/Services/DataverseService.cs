@@ -777,6 +777,91 @@ public class DataverseService : IDataverseService
         return DateOnly.FromDateTime(dateTime.UtcDateTime);
     }
 
+    public async Task<IReadOnlyList<EmptyOrderAccount>> ListActiveAccountsForDeliveryDateAsync(DateOnly deliveryDate, CancellationToken cancellationToken = default)
+    {
+        var optionValue = OrderOnDays.For(deliveryDate.DayOfWeek);
+        var filter = "statecode eq 0 and " +
+                     $"Microsoft.Dynamics.CRM.ContainValues(PropertyName='mb_orderondays',PropertyValues=['{optionValue}'])";
+        var url = $"{_dataverseUrl}/api/data/v9.2/accounts?$select=accountid,name,_mb_pricelist_value&$filter={Uri.EscapeDataString(filter)}";
+
+        var accounts = new List<EmptyOrderAccount>();
+        await ForEachPageAsync(url, row =>
+        {
+            var accountId = Guid.Parse(row.GetProperty("accountid").GetString()!);
+            var name = row.TryGetProperty("name", out var nameProp) && nameProp.ValueKind == JsonValueKind.String
+                ? nameProp.GetString()
+                : null;
+            Guid? priceListId = null;
+            if (row.TryGetProperty("_mb_pricelist_value", out var priceListProp) &&
+                priceListProp.ValueKind == JsonValueKind.String &&
+                Guid.TryParse(priceListProp.GetString(), out var parsedPriceList))
+            {
+                priceListId = parsedPriceList;
+            }
+
+            accounts.Add(new EmptyOrderAccount(accountId, name, priceListId));
+        }, cancellationToken);
+
+        return accounts;
+    }
+
+    public async Task<IReadOnlySet<Guid>> ListAccountIdsWithOrderOnDateAsync(DateOnly deliveryDate, CancellationToken cancellationToken = default)
+    {
+        var dateFrom = deliveryDate.ToString("yyyy-MM-dd");
+        var dateTo = deliveryDate.AddDays(1).ToString("yyyy-MM-dd");
+        // Sale kind, or no kind yet (orders created before order kind existed). Return orders use a credit date and do not occupy the delivery date.
+        var filter = $"mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z and (mb_order_kind eq {OrderKind.Sale} or mb_order_kind eq null)";
+        var url = $"{_dataverseUrl}/api/data/v9.2/mb_orders?$select=_mb_customer_value&$filter={Uri.EscapeDataString(filter)}";
+
+        var accountIds = new HashSet<Guid>();
+        await ForEachPageAsync(url, row =>
+        {
+            if (row.TryGetProperty("_mb_customer_value", out var customerProp) &&
+                customerProp.ValueKind == JsonValueKind.String &&
+                Guid.TryParse(customerProp.GetString(), out var customerId))
+            {
+                accountIds.Add(customerId);
+            }
+        }, cancellationToken);
+
+        return accountIds;
+    }
+
+    public async Task CreateEmptyOrderAsync(Guid accountId, Guid priceListId, DateOnly deliveryDate, CancellationToken cancellationToken = default)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["mb_deliverydate"] = deliveryDate.ToString("yyyy-MM-dd"),
+            ["mb_order_kind"] = OrderKind.Sale,
+            ["mb_Customer_account@odata.bind"] = $"/accounts({accountId:D})",
+            ["mb_Pricelist@odata.bind"] = $"/mb_pricelists({priceListId:D})"
+        };
+
+        var url = $"{_dataverseUrl}/api/data/v9.2/mb_orders";
+        using var response = await SendAsync(HttpMethod.Post, url, body, cancellationToken);
+        response.EnsureSuccessStatusCode();
+    }
+
+    private async Task ForEachPageAsync(string? url, Action<JsonElement> readRow, CancellationToken cancellationToken)
+    {
+        while (!string.IsNullOrWhiteSpace(url))
+        {
+            using var response = await SendAsync(HttpMethod.Get, url, body: null, cancellationToken);
+            response.EnsureSuccessStatusCode();
+
+            using var doc = await JsonDocument.ParseAsync(await response.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+            if (doc.RootElement.TryGetProperty("value", out var valueProp))
+            {
+                foreach (var row in valueProp.EnumerateArray())
+                    readRow(row);
+            }
+
+            url = doc.RootElement.TryGetProperty("@odata.nextLink", out var nextLinkProp)
+                ? nextLinkProp.GetString()
+                : null;
+        }
+    }
+
     private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string url, object? body, CancellationToken cancellationToken)
     {
         var token = await _credential.GetTokenAsync(new TokenRequestContext(_scopes), cancellationToken);
