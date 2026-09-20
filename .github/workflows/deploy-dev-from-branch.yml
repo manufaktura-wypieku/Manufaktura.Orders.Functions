@@ -1,0 +1,91 @@
+name: Deploy DEV from branch
+
+# Manually deploy the selected branch to the shared DEV Function App.
+# After this workflow exists on main: Actions → Deploy DEV from branch → Run workflow → pick branch.
+
+on:
+  workflow_dispatch:
+    inputs:
+      skip_tests:
+        description: "Skip unit tests (emergency only)"
+        type: boolean
+        default: false
+
+concurrency:
+  group: deploy-dev-from-branch
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+env:
+  DOTNET_VERSION: "10.0.x"
+  FUNCTION_PROJECT: "src/Manufaktura.Orders.Functions/Manufaktura.Orders.Functions.csproj"
+  TEST_PROJECT: "tests/Manufaktura.Orders.Functions.Tests/Manufaktura.Orders.Functions.Tests.csproj"
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      actions: write
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Restore
+        run: dotnet restore ${{ env.FUNCTION_PROJECT }}
+
+      - name: Build
+        run: dotnet build ${{ env.FUNCTION_PROJECT }} --configuration Release --no-restore
+
+      - name: Test
+        if: ${{ inputs.skip_tests != true }}
+        run: dotnet test ${{ env.TEST_PROJECT }} --configuration Release --verbosity normal
+
+      - name: Publish
+        run: dotnet publish ${{ env.FUNCTION_PROJECT }} --configuration Release --output ./publish
+
+      - name: Prepare Flex Consumption package structure
+        run: |
+          mkdir -p ./publish/.azurefunctions
+          [ -f ./publish/functions.metadata ] && mv ./publish/functions.metadata ./publish/.azurefunctions/
+
+      - name: Zip function app
+        run: cd publish && zip -r ../function.zip .
+
+      - name: Upload artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: function-app
+          path: function.zip
+
+      - name: Summarize
+        run: |
+          {
+            echo "## Branch → DEV package"
+            echo ""
+            echo "| Item | Value |"
+            echo "| --- | --- |"
+            echo "| Branch | \`${{ github.ref_name }}\` |"
+            echo "| SHA | \`${{ github.sha }}\` |"
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-dev:
+    needs: build-and-test
+    permissions:
+      id-token: write
+      contents: read
+      actions: read
+    uses: ./.github/workflows/deploy.yml
+    with:
+      environment: dev
+      env_name: dev
+    secrets:
+      AZURE_CLIENT_ID: ${{ secrets.AZURE_CLIENT_ID }}
+      AZURE_TENANT_ID: ${{ secrets.AZURE_TENANT_ID }}
+      AZURE_SUBSCRIPTION_ID: ${{ secrets.AZURE_SUBSCRIPTION_ID }}

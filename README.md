@@ -79,6 +79,14 @@ To skip Dataverse setup entirely, pass empty strings for all three URL parameter
 
 ### CI/CD
 
+**Deploy a branch to DEV** (after this workflow is on `main`):
+
+1. GitHub → **Actions** → **Deploy DEV from branch**
+2. **Run workflow** → choose the branch to deploy
+3. Builds, tests, and deploys that ref to the shared DEV Function App
+
+Optional input `skip_tests` skips unit tests (emergency only).
+
 Pushes to `main` trigger the full pipeline:
 
 1. **Build & Test** — compile + run unit tests
