@@ -49,7 +49,7 @@ public class ApplyCoverPlan
         }
 
         if (request is null)
-            return new BadRequestObjectResult(new { error = "Request body is required.", code = "invalid_json" });
+            return new BadRequestObjectResult(new { error = "Request body is required.", code = "missing_body" });
 
         var validationError = Validate(request);
         if (validationError is not null)

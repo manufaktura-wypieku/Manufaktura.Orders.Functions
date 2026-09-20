@@ -109,6 +109,16 @@ public class ApplyCoverPlanTests
         Assert.Contains(response.Warnings, warning => warning.Contains("every matching order", StringComparison.OrdinalIgnoreCase));
     }
 
+    [Fact]
+    public async Task ReturnsMissingBodyWhenRequestIsNullLiteral()
+    {
+        var result = await _function.Run(CreateHttpRequest("null"), CancellationToken.None);
+
+        var bad = Assert.IsType<BadRequestObjectResult>(result);
+        using var doc = JsonDocument.Parse(JsonSerializer.Serialize(bad.Value));
+        Assert.Equal("missing_body", doc.RootElement.GetProperty("code").GetString());
+    }
+
     private static Dictionary<string, object> ValidBody()
         => new()
         {
@@ -126,7 +136,7 @@ public class ApplyCoverPlanTests
 
     private static HttpRequest CreateHttpRequest(object body)
     {
-        var json = JsonSerializer.Serialize(body);
+        var json = body is string raw ? raw : JsonSerializer.Serialize(body);
         var context = new DefaultHttpContext();
         var bytes = Encoding.UTF8.GetBytes(json);
         context.Request.Body = new MemoryStream(bytes);

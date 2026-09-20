@@ -206,6 +206,47 @@ public class DataverseServiceTests
     }
 
     [Fact]
+    public async Task GetDeliveryNote_ThrowsOrderNotFound_WhenLinkedOrderIsMissing()
+    {
+        var noteId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        var orderId = Guid.Parse("bbbbbbbb-cccc-dddd-eeee-ffffffffffff");
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(OkJson($$"""{"_mb_order_value":"{{orderId:D}}"}"""));
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        var service = CreateService(handler);
+        var ex = await Assert.ThrowsAsync<MissingDeliveryPackGroupingException>(() => service.GetDeliveryNoteAsync(noteId));
+
+        Assert.Equal(noteId, ex.DeliveryNoteId);
+        Assert.Equal("order_not_found", ex.Code);
+        Assert.Contains(orderId.ToString("D"), ex.Message);
+    }
+
+    [Fact]
+    public async Task AppendDeliveryPackLog_RetriesWhenIfMatchFails()
+    {
+        var packId = Guid.Parse("aaaaaaaa-0001-0001-0001-000000000001");
+        var firstGet = OkJson("""{"mb_log":"old"}""");
+        firstGet.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"etag-1\"");
+        var secondGet = OkJson("""{"mb_log":"old\nnewer"}""");
+        secondGet.Headers.ETag = new System.Net.Http.Headers.EntityTagHeaderValue("\"etag-2\"");
+
+        var handler = new FakeHttpMessageHandler();
+        handler.Enqueue(firstGet);
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.PreconditionFailed));
+        handler.Enqueue(secondGet);
+        handler.Enqueue(new HttpResponseMessage(HttpStatusCode.NoContent));
+
+        var service = CreateService(handler);
+        await service.AppendDeliveryPackLogAsync(packId, "Superseded by delivery pack.", TestContext.Current.CancellationToken);
+
+        Assert.Equal(4, handler.SentRequests.Count);
+        Assert.Equal("\"etag-1\"", handler.SentRequests[1].IfMatch);
+        Assert.Equal("\"etag-2\"", handler.SentRequests[3].IfMatch);
+        Assert.Contains("Superseded by delivery pack.", handler.SentRequests[3].Body);
+    }
+
+    [Fact]
     public async Task GetEffectiveDriverResolutionRequestForOrder_LoadsOrderRouteOverridesAndAbsences()
     {
         var orderId = Guid.Parse("11111111-1111-1111-1111-111111111111");

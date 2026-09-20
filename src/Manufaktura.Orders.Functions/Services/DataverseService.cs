@@ -203,20 +203,44 @@ public class DataverseService : IDataverseService
 
     public async Task AppendDeliveryPackLogAsync(Guid packId, string message, CancellationToken cancellationToken = default)
     {
-        var getUrl = $"{_dataverseUrl}/api/data/v9.2/mb_deliverypacks({packId:D})?$select=mb_log";
-        using var getResponse = await SendAsync(HttpMethod.Get, getUrl, body: null, cancellationToken);
-        getResponse.EnsureSuccessStatusCode();
+        const int maxAttempts = 3;
+        for (var attempt = 1; attempt <= maxAttempts; attempt++)
+        {
+            var getUrl = $"{_dataverseUrl}/api/data/v9.2/mb_deliverypacks({packId:D})?$select=mb_log";
+            using var getResponse = await SendAsync(HttpMethod.Get, getUrl, body: null, cancellationToken);
+            getResponse.EnsureSuccessStatusCode();
 
-        using var doc = await JsonDocument.ParseAsync(await getResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
-        var existing = doc.RootElement.TryGetProperty("mb_log", out var logProperty) && logProperty.ValueKind == JsonValueKind.String
-            ? logProperty.GetString()
-            : null;
-        var line = $"[{DateTimeOffset.UtcNow:O}] {message}";
-        var combined = string.IsNullOrWhiteSpace(existing) ? line : existing + Environment.NewLine + line;
+            using var doc = await JsonDocument.ParseAsync(await getResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+            var existing = doc.RootElement.TryGetProperty("mb_log", out var logProperty) && logProperty.ValueKind == JsonValueKind.String
+                ? logProperty.GetString()
+                : null;
+            var line = $"[{DateTimeOffset.UtcNow:O}] {message}";
+            var combined = string.IsNullOrWhiteSpace(existing) ? line : existing + Environment.NewLine + line;
+            var etag = getResponse.Headers.ETag?.Tag
+                ?? (getResponse.Headers.TryGetValues("ETag", out var etagValues) ? etagValues.FirstOrDefault() : null);
 
-        var patchUrl = $"{_dataverseUrl}/api/data/v9.2/mb_deliverypacks({packId:D})";
-        using var patchResponse = await SendAsync(HttpMethod.Patch, patchUrl, new Dictionary<string, object?> { ["mb_log"] = combined }, cancellationToken);
-        patchResponse.EnsureSuccessStatusCode();
+            var patchUrl = $"{_dataverseUrl}/api/data/v9.2/mb_deliverypacks({packId:D})";
+            using var patchResponse = await SendAsync(
+                HttpMethod.Patch,
+                patchUrl,
+                new Dictionary<string, object?> { ["mb_log"] = combined },
+                cancellationToken,
+                ifMatch: etag);
+
+            if (patchResponse.IsSuccessStatusCode)
+                return;
+
+            if (patchResponse.StatusCode == System.Net.HttpStatusCode.PreconditionFailed && attempt < maxAttempts)
+            {
+                _logger.LogWarning(
+                    "Delivery pack {PackId} log append hit a concurrent update on attempt {Attempt}. Retrying.",
+                    packId,
+                    attempt);
+                continue;
+            }
+
+            patchResponse.EnsureSuccessStatusCode();
+        }
     }
 
     public async Task UpdateOrderEffectiveDriverAsync(Guid orderId, Guid homeDeliveryRouteId, EffectiveDriverResolutionResult resolution, CancellationToken cancellationToken = default)
@@ -248,6 +272,8 @@ public class DataverseService : IDataverseService
 
         var orderUrl = $"{_dataverseUrl}/api/data/v9.2/mb_orders({orderId:D})?$select=mb_deliverydate,_mb_effectivedriver_value";
         using var orderResponse = await SendAsync(HttpMethod.Get, orderUrl, body: null, cancellationToken);
+        if (orderResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+            throw MissingDeliveryPackGroupingException.OrderNotFound(id, orderId);
         orderResponse.EnsureSuccessStatusCode();
 
         using var orderDoc = await JsonDocument.ParseAsync(await orderResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
@@ -862,7 +888,12 @@ public class DataverseService : IDataverseService
         }
     }
 
-    private async Task<HttpResponseMessage> SendAsync(HttpMethod method, string url, object? body, CancellationToken cancellationToken)
+    private async Task<HttpResponseMessage> SendAsync(
+        HttpMethod method,
+        string url,
+        object? body,
+        CancellationToken cancellationToken,
+        string? ifMatch = null)
     {
         var token = await _credential.GetTokenAsync(new TokenRequestContext(_scopes), cancellationToken);
 
@@ -871,6 +902,8 @@ public class DataverseService : IDataverseService
         request.Headers.Add("OData-MaxVersion", "4.0");
         request.Headers.Add("OData-Version", "4.0");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        if (!string.IsNullOrWhiteSpace(ifMatch))
+            request.Headers.TryAddWithoutValidation("If-Match", ifMatch);
 
         if (body is not null)
         {
@@ -886,7 +919,7 @@ public class DataverseService : IDataverseService
                 ? await response.Content.ReadAsStringAsync(cancellationToken)
                 : string.Empty;
 
-            if (response.StatusCode == System.Net.HttpStatusCode.Conflict)
+            if (response.StatusCode is System.Net.HttpStatusCode.Conflict or System.Net.HttpStatusCode.PreconditionFailed)
             {
                 _logger.LogWarning(
                     "Dataverse returned {StatusCode} for {Method} {Url}. Response body: {Body}",

@@ -16,6 +16,9 @@ public class MissingDeliveryPackGroupingException : Exception
     public static MissingDeliveryPackGroupingException MissingOrder(Guid deliveryNoteId) =>
         new(deliveryNoteId, "missing_order", $"Delivery note '{deliveryNoteId:D}' has no order assigned.");
 
+    public static MissingDeliveryPackGroupingException OrderNotFound(Guid deliveryNoteId, Guid orderId) =>
+        new(deliveryNoteId, "order_not_found", $"Order '{orderId:D}' linked to delivery note '{deliveryNoteId:D}' was not found.");
+
     public static MissingDeliveryPackGroupingException MissingDeliveryDate(Guid deliveryNoteId, Guid orderId) =>
         new(deliveryNoteId, "missing_delivery_date", $"Order '{orderId:D}' linked to delivery note '{deliveryNoteId:D}' has no delivery date assigned.");
 
