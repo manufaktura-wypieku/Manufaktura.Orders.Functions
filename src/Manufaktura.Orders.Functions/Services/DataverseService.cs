@@ -329,7 +329,8 @@ public class DataverseService : IDataverseService
     {
         var dateFrom = deliveryDate.ToString("yyyy-MM-dd");
         var dateTo = deliveryDate.AddDays(1).ToString("yyyy-MM-dd");
-        var filter = $"mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z";
+        // Sale kind, or no kind yet (orders created before order kind existed). Return orders use a credit date and do not occupy the delivery date.
+        var filter = $"mb_deliverydate ge {dateFrom}T00:00:00Z and mb_deliverydate lt {dateTo}T00:00:00Z and (mb_order_kind eq 124530000 or mb_order_kind eq null)";
         var url = $"{_dataverseUrl}/api/data/v9.2/mb_orders?$select=_mb_customer_value&$filter={Uri.EscapeDataString(filter)}";
 
         var accountIds = new HashSet<Guid>();
@@ -351,6 +352,7 @@ public class DataverseService : IDataverseService
         var body = new Dictionary<string, object?>
         {
             ["mb_deliverydate"] = deliveryDate.ToString("yyyy-MM-dd"),
+            ["mb_order_kind"] = 124530000,
             ["mb_Customer_account@odata.bind"] = $"/accounts({accountId:D})",
             ["mb_Pricelist@odata.bind"] = $"/mb_pricelists({priceListId:D})"
         };
