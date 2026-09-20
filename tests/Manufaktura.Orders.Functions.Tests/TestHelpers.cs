@@ -2,7 +2,7 @@ using Azure.Core;
 
 namespace Manufaktura.Orders.Functions.Tests;
 
-internal sealed record CapturedRequest(HttpMethod Method, string Url, string? Body, string? ContentRange = null);
+internal sealed record CapturedRequest(HttpMethod Method, string Url, string? Body, string? ContentRange = null, string? IfMatch = null);
 
 internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 {
@@ -16,7 +16,8 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
         var url = request.RequestUri!.ToString();
         var contentRange = request.Content?.Headers.ContentRange?.ToString();
         var body = request.Content is null ? null : await request.Content.ReadAsStringAsync(cancellationToken);
-        SentRequests.Add(new(request.Method, url, body, contentRange));
+        var ifMatch = request.Headers.TryGetValues("If-Match", out var values) ? values.FirstOrDefault() : null;
+        SentRequests.Add(new(request.Method, url, body, contentRange, ifMatch));
         return _responses.Count == 0
             ? throw new InvalidOperationException($"No more queued responses for {request.Method} {url}.")
             : _responses.Dequeue();
