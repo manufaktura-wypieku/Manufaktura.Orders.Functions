@@ -76,8 +76,8 @@ public interface IDataverseService
     Task<IReadOnlyList<EmptyOrderAccount>> ListActiveAccountsForDeliveryDateAsync(DateOnly deliveryDate, CancellationToken cancellationToken = default);
 
     /// <summary>
-    /// Account ids that already have a sale order on <paramref name="deliveryDate"/>, active or inactive.
-    /// A return order does not occupy the delivery date.
+    /// Account ids that already have a sale order, or an order whose kind is null, on <paramref name="deliveryDate"/>, active or inactive.
+    /// A null kind is an order created before order kind existed and is treated as a sale order. A return order does not occupy the delivery date.
     /// </summary>
     Task<IReadOnlySet<Guid>> ListAccountIdsWithOrderOnDateAsync(DateOnly deliveryDate, CancellationToken cancellationToken = default);
 
