@@ -38,5 +38,7 @@ builder.Services.AddSingleton<TokenCredential>(sp => sp.GetRequiredService<Defau
 builder.Services.AddHttpClient<IDocumentMergeService, DocumentMergeService>();
 builder.Services.AddHttpClient<IDataverseService, DataverseService>();
 builder.Services.AddHttpClient<ISharePointService, SharePointService>();
+builder.Services.AddSingleton<IDeliveryNoteWordTemplateFiller, DeliveryNoteWordTemplateFiller>();
+builder.Services.AddTransient<IDeliveryNoteDocumentGenerator, DeliveryNoteDocumentGenerator>();
 
 builder.Build().Run();

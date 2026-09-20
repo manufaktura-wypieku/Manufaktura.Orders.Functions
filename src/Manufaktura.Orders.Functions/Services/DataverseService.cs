@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
@@ -43,6 +44,118 @@ public class DataverseService : IDataverseService
         var deliveryDate = root.GetProperty("mb_deliverydate").GetDateTimeOffset();
 
         return new DeliveryNoteRecord(id, routeId, deliveryDate);
+    }
+
+    public async Task<DeliveryNoteDocumentSource> GetDeliveryNoteDocumentSourceAsync(Guid deliveryNoteId, CancellationToken cancellationToken = default)
+    {
+        var noteUrl = $"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes({deliveryNoteId:D})?$select=mb_deliverynoteid,createdon,mb_url,_mb_order_value";
+        using var noteResponse = await SendAsync(HttpMethod.Get, noteUrl, body: null, cancellationToken);
+        noteResponse.EnsureSuccessStatusCode();
+
+        using var noteDoc = await JsonDocument.ParseAsync(await noteResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        var note = noteDoc.RootElement;
+        var orderId = GetLookupValue(note, "_mb_order_value")
+            ?? throw new InvalidOperationException($"Delivery note '{deliveryNoteId:D}' has no order assigned.");
+        var createdOn = note.TryGetProperty("createdon", out var createdOnProp) && createdOnProp.ValueKind == JsonValueKind.String
+            ? DateTimeOffset.Parse(createdOnProp.GetString()!, CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind)
+            : DateTimeOffset.UtcNow;
+        var existingUrl = note.TryGetProperty("mb_url", out var urlProp) && urlProp.ValueKind == JsonValueKind.String
+            ? urlProp.GetString()
+            : null;
+
+        var orderUrl =
+            $"{_dataverseUrl}/api/data/v9.2/mb_orders({orderId:D})" +
+            "?$select=mb_name,mb_deliverydate,mb_total" +
+            "&$expand=mb_Customer_account($select=name,mb_accountnumber,address1_line1,address1_postalcode,address1_city,mb_redbasket)," +
+            "mb_mb_orderitem_Order_mb_order($select=mb_quantity,mb_priceunit,mb_value,_mb_product_value)";
+        using var orderResponse = await SendAsync(HttpMethod.Get, orderUrl, body: null, cancellationToken);
+        if (orderResponse.StatusCode == System.Net.HttpStatusCode.NotFound)
+            throw new HttpRequestException($"Order '{orderId:D}' was not found.", null, System.Net.HttpStatusCode.NotFound);
+        orderResponse.EnsureSuccessStatusCode();
+
+        using var orderDoc = await JsonDocument.ParseAsync(await orderResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+        var order = orderDoc.RootElement;
+        var orderName = order.TryGetProperty("mb_name", out var orderNameProp) ? orderNameProp.GetString() ?? string.Empty : string.Empty;
+        var deliveryDate = TryGetDateTimeOffset(order, "mb_deliverydate");
+        var orderTotal = TryGetDecimal(order, "mb_total");
+
+        var customerElement = order.TryGetProperty("mb_Customer_account", out var customerProp) && customerProp.ValueKind == JsonValueKind.Object
+            ? customerProp
+            : default;
+        var customer = new DeliveryNoteCustomer(
+            Name: GetStringProperty(customerElement, "name"),
+            AccountNumber: GetStringProperty(customerElement, "mb_accountnumber"),
+            AddressLine1: GetStringProperty(customerElement, "address1_line1"),
+            PostalCode: GetStringProperty(customerElement, "address1_postalcode"),
+            City: GetStringProperty(customerElement, "address1_city"),
+            RedBasket: customerElement.ValueKind == JsonValueKind.Object
+                && customerElement.TryGetProperty("mb_redbasket", out var redBasket)
+                && redBasket.ValueKind == JsonValueKind.True);
+
+        var lines = new List<DeliveryNoteLine>();
+        if (order.TryGetProperty("mb_mb_orderitem_Order_mb_order", out var itemsProp) && itemsProp.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var item in itemsProp.EnumerateArray())
+            {
+                var quantity = TryGetDecimal(item, "mb_quantity");
+                if (quantity is null || quantity <= 0)
+                    continue;
+
+                var productId = GetLookupValue(item, "_mb_product_value");
+                string? nameEn = null;
+                string? productNumber = null;
+                if (productId is Guid pid)
+                {
+                    var productUrl = $"{_dataverseUrl}/api/data/v9.2/mb_products({pid:D})?$select=mb_name_en,mb_productnumber";
+                    using var productResponse = await SendAsync(HttpMethod.Get, productUrl, body: null, cancellationToken);
+                    if (productResponse.IsSuccessStatusCode)
+                    {
+                        using var productDoc = await JsonDocument.ParseAsync(await productResponse.Content.ReadAsStreamAsync(cancellationToken), cancellationToken: cancellationToken);
+                        nameEn = GetStringProperty(productDoc.RootElement, "mb_name_en");
+                        productNumber = GetStringProperty(productDoc.RootElement, "mb_productnumber");
+                    }
+                }
+
+                var namePl = item.TryGetProperty("_mb_product_value@OData.Community.Display.V1.FormattedValue", out var formatted)
+                    ? formatted.GetString()
+                    : null;
+
+                lines.Add(new DeliveryNoteLine(
+                    NamePl: namePl,
+                    NameEn: nameEn,
+                    Quantity: quantity,
+                    PriceUnit: TryGetDecimal(item, "mb_priceunit"),
+                    Value: TryGetDecimal(item, "mb_value"),
+                    ProductNumber: productNumber));
+            }
+        }
+
+        lines = lines
+            .OrderBy(l => l.ProductNumber ?? string.Empty, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        return new DeliveryNoteDocumentSource(
+            deliveryNoteId,
+            createdOn,
+            existingUrl,
+            orderName,
+            deliveryDate,
+            orderTotal,
+            customer,
+            lines);
+    }
+
+    public async Task UpdateDeliveryNoteDocumentAsync(Guid deliveryNoteId, string name, string url, CancellationToken cancellationToken = default)
+    {
+        var body = new Dictionary<string, object?>
+        {
+            ["mb_name"] = name,
+            ["mb_url"] = url
+        };
+
+        var requestUrl = $"{_dataverseUrl}/api/data/v9.2/mb_deliverynotes({deliveryNoteId:D})";
+        using var response = await SendAsync(HttpMethod.Patch, requestUrl, body, cancellationToken);
+        response.EnsureSuccessStatusCode();
     }
 
     public async Task<int> CountCompletedOrdersByRouteAndDateAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default)
@@ -391,6 +504,7 @@ public class DataverseService : IDataverseService
         request.Headers.Add("OData-MaxVersion", "4.0");
         request.Headers.Add("OData-Version", "4.0");
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
+        request.Headers.TryAddWithoutValidation("Prefer", "odata.include-annotations=\"*\"");
 
         if (body is not null)
         {
@@ -411,5 +525,47 @@ public class DataverseService : IDataverseService
         }
 
         return response;
+    }
+
+    private static Guid? GetLookupValue(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.String)
+            return null;
+
+        return Guid.TryParse(property.GetString(), out var id) ? id : null;
+    }
+
+    private static string? GetStringProperty(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object)
+            return null;
+        if (!element.TryGetProperty(propertyName, out var property) || property.ValueKind != JsonValueKind.String)
+            return null;
+        return property.GetString();
+    }
+
+    private static decimal? TryGetDecimal(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var property))
+            return null;
+
+        return property.ValueKind switch
+        {
+            JsonValueKind.Number => property.GetDecimal(),
+            JsonValueKind.String when decimal.TryParse(property.GetString(), NumberStyles.Number, CultureInfo.InvariantCulture, out var parsed) => parsed,
+            _ => null
+        };
+    }
+
+    private static DateTimeOffset? TryGetDateTimeOffset(JsonElement element, string propertyName)
+    {
+        if (element.ValueKind != JsonValueKind.Object || !element.TryGetProperty(propertyName, out var property))
+            return null;
+
+        if (property.ValueKind == JsonValueKind.String
+            && DateTimeOffset.TryParse(property.GetString(), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var parsed))
+            return parsed;
+
+        return null;
     }
 }

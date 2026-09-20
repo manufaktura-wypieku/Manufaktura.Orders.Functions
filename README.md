@@ -32,9 +32,11 @@ Azure Functions service for the Manufaktura Orders system. Provides HTTP-trigger
 
 ## Functions
 
-| Function             | Trigger   | Description                                                                                                                          |
-| -------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
-| `MergeDeliveryNotes` | HTTP POST | Accepts an array of SharePoint document URLs, downloads them as PDF via Graph API, merges into a single PDF, and returns the result. |
+| Function                        | Trigger   | Description                                                                                                                          |
+| ------------------------------- | --------- | ------------------------------------------------------------------------------------------------------------------------------------ |
+| `MergeDeliveryNotes`            | HTTP POST | Accepts an array of SharePoint document URLs, downloads them as PDF via Graph API, merges into a single PDF, and returns the result. |
+| `GenerateDeliveryPack`          | HTTP POST | When all delivery notes for a route/date have URLs, merges them into a Delivery Pack PDF and updates Dataverse.                      |
+| `GenerateDeliveryNoteDocument`  | HTTP POST | Fills the SharePoint Word template, converts to PDF via Graph, stores PDF under `Delivery notes/`, and sets `mb_url` / `mb_name`.  |
 
 ## Local Development
 
@@ -55,6 +57,19 @@ func start
 ```bash
 dotnet test
 ```
+
+### GenerateDeliveryNoteDocument
+
+`POST /api/GenerateDeliveryNoteDocument`
+
+```json
+{ "deliveryNoteId": "<guid>", "force": false }
+```
+
+- Skips with `already_has_url` when `mb_url` is set unless `force` is true.
+- Template path: config `DeliveryNoteTemplatePath` (default `Templates/delivery_note_patterns_footer.docx`) on `SharePointSiteUrl`.
+- Repo copy: [`templates/delivery_note_patterns_footer.docx`](../templates/delivery_note_patterns_footer.docx) (sync to each SharePoint site’s `Templates/` after edits).
+- Writes PDF only under `Delivery notes/`; temporary `.docx` is deleted after Graph PDF conversion.
 
 ## Deployment
 
@@ -78,6 +93,14 @@ The Dataverse environment URLs default to the Manufaktura dev/test/prod organisa
 To skip Dataverse setup entirely, pass empty strings for all three URL parameters.
 
 ### CI/CD
+
+**Deploy the current branch to DEV**
+
+1. GitHub → **Actions** → **Deploy DEV from branch**
+2. **Run workflow** → choose the branch
+3. Builds, tests, and deploys to the shared DEV Function App (reuses `deploy.yml`)
+
+Optional input `skip_tests` skips unit tests (emergency only).
 
 Pushes to `main` trigger the full pipeline:
 

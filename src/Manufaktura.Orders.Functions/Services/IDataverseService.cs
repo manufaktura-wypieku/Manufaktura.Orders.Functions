@@ -10,6 +10,16 @@ public interface IDataverseService
     Task<DeliveryNoteRecord> GetDeliveryNoteAsync(Guid id, CancellationToken cancellationToken = default);
 
     /// <summary>
+    /// Loads the delivery note, order, customer, and order lines needed to generate a delivery note document.
+    /// </summary>
+    Task<DeliveryNoteDocumentSource> GetDeliveryNoteDocumentSourceAsync(Guid deliveryNoteId, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Sets the delivery note document name and SharePoint PDF URL.
+    /// </summary>
+    Task UpdateDeliveryNoteDocumentAsync(Guid deliveryNoteId, string name, string url, CancellationToken cancellationToken = default);
+
+    /// <summary>
     /// Counts inactive (completed) orders whose customer account belongs to the given route, for the given delivery date.
     /// </summary>
     Task<int> CountCompletedOrdersByRouteAndDateAsync(Guid routeId, DateTimeOffset deliveryDate, CancellationToken cancellationToken = default);

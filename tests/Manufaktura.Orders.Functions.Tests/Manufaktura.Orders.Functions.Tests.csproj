@@ -14,4 +14,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\src\Manufaktura.Orders.Functions\Manufaktura.Orders.Functions.csproj" />
   </ItemGroup>
+  <ItemGroup>
+    <Content Include="Fixtures\delivery_note_patterns_footer.docx" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
 </Project>

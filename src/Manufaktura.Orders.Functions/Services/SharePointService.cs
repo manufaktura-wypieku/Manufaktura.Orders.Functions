@@ -62,11 +62,11 @@ public class SharePointService : ISharePointService
 
         if (pdfContent.Length <= SimpleUploadThresholdBytes)
         {
-            await SimpleUploadAsync(graphBaseUrl + "/content", pdfContent, token.Token, cancellationToken);
+            await SimpleUploadAsync(graphBaseUrl + "/content", pdfContent, "application/pdf", token.Token, cancellationToken);
         }
         else
         {
-            await UploadSessionAsync(graphBaseUrl + "/createUploadSession", pdfContent, token.Token, cancellationToken);
+            await UploadSessionAsync(graphBaseUrl + "/createUploadSession", pdfContent, "application/pdf", token.Token, cancellationToken);
         }
 
         // Return the SharePoint URL of the uploaded file.
@@ -75,18 +75,111 @@ public class SharePointService : ISharePointService
         return $"{siteBase}{sitePath}/Shared%20Documents/{Uri.EscapeDataString("DeliveryPacks")}/{Uri.EscapeDataString(safeRouteName)}/{Uri.EscapeDataString(fileName)}";
     }
 
-    private async Task SimpleUploadAsync(string contentUrl, byte[] pdfContent, string bearerToken, CancellationToken cancellationToken)
+    public async Task<byte[]> DownloadFileByPathAsync(string itemPath, CancellationToken cancellationToken = default)
+    {
+        var (resolvedSiteId, bearerToken, encodedPath) = await ResolvePathAsync(itemPath, cancellationToken);
+        var contentUrl = $"https://graph.microsoft.com/v1.0/sites/{resolvedSiteId}/drive/root:/{encodedPath}:/content";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, contentUrl);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsByteArrayAsync(cancellationToken);
+    }
+
+    public async Task<string> UploadFileAsync(string folderPath, string fileName, byte[] content, string contentType, CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(folderPath);
+        ArgumentException.ThrowIfNullOrWhiteSpace(fileName);
+        ArgumentNullException.ThrowIfNull(content);
+        ArgumentException.ThrowIfNullOrWhiteSpace(contentType);
+
+        var safeFolder = string.Join("/", folderPath.Split('/', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Select(SanitizePathSegment));
+        var safeFileName = SanitizePathSegment(fileName);
+        var itemPath = $"{safeFolder}/{safeFileName}";
+
+        var (resolvedSiteId, bearerToken, encodedPath) = await ResolvePathAsync(itemPath, cancellationToken);
+        var siteGraphUrl = $"https://graph.microsoft.com/v1.0/sites/{resolvedSiteId}";
+        var graphBaseUrl = $"{siteGraphUrl}/drive/root:/{encodedPath}:";
+
+        await EnsureFolderAsync(siteGraphUrl, safeFolder, bearerToken, cancellationToken);
+
+        if (content.Length <= SimpleUploadThresholdBytes)
+        {
+            await SimpleUploadAsync(graphBaseUrl + "/content", content, contentType, bearerToken, cancellationToken);
+        }
+        else
+        {
+            await UploadSessionAsync(graphBaseUrl + "/createUploadSession", content, contentType, bearerToken, cancellationToken);
+        }
+
+        return BuildSharedDocumentsUrl(safeFolder, safeFileName);
+    }
+
+    public async Task<byte[]> DownloadAsPdfAsync(string itemPath, CancellationToken cancellationToken = default)
+    {
+        var (resolvedSiteId, bearerToken, encodedPath) = await ResolvePathAsync(itemPath, cancellationToken);
+        var contentUrl = $"https://graph.microsoft.com/v1.0/sites/{resolvedSiteId}/drive/root:/{encodedPath}:/content?format=pdf";
+
+        using var request = new HttpRequestMessage(HttpMethod.Get, contentUrl);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        response.EnsureSuccessStatusCode();
+        return await response.Content.ReadAsByteArrayAsync(cancellationToken);
+    }
+
+    public async Task DeleteFileByPathAsync(string itemPath, CancellationToken cancellationToken = default)
+    {
+        var (resolvedSiteId, bearerToken, encodedPath) = await ResolvePathAsync(itemPath, cancellationToken);
+        var deleteUrl = $"https://graph.microsoft.com/v1.0/sites/{resolvedSiteId}/drive/root:/{encodedPath}";
+
+        using var request = new HttpRequestMessage(HttpMethod.Delete, deleteUrl);
+        request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
+
+        using var response = await _httpClient.SendAsync(request, cancellationToken);
+        if (response.StatusCode == System.Net.HttpStatusCode.NotFound)
+            return;
+
+        response.EnsureSuccessStatusCode();
+    }
+
+    private async Task<(string ResolvedSiteId, string BearerToken, string EncodedPath)> ResolvePathAsync(string itemPath, CancellationToken cancellationToken)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(itemPath);
+
+        var normalized = itemPath.Replace('\\', '/').Trim('/');
+        var (siteId, _) = DocumentMergeService.ParseSharePointUrl(_sharePointSiteUrl + "/Shared%20Documents/placeholder");
+        var token = await _credential.GetTokenAsync(new TokenRequestContext(GraphScopes), cancellationToken);
+        var resolvedSiteId = await ResolveSiteIdAsync(siteId, token.Token, cancellationToken);
+        var encodedPath = string.Join("/", normalized.Split('/').Select(Uri.EscapeDataString));
+        return (resolvedSiteId, token.Token, encodedPath);
+    }
+
+    private string BuildSharedDocumentsUrl(string folderPath, string fileName)
+    {
+        var siteBase = new Uri(_sharePointSiteUrl).GetLeftPart(UriPartial.Authority);
+        var sitePath = new Uri(_sharePointSiteUrl).AbsolutePath.TrimEnd('/');
+        var folderSegments = folderPath.Split('/', StringSplitOptions.RemoveEmptyEntries)
+            .Select(Uri.EscapeDataString);
+        var folderUrl = string.Join("/", folderSegments);
+        return $"{siteBase}{sitePath}/Shared%20Documents/{folderUrl}/{Uri.EscapeDataString(fileName)}";
+    }
+
+    private async Task SimpleUploadAsync(string contentUrl, byte[] content, string contentType, string bearerToken, CancellationToken cancellationToken)
     {
         using var request = new HttpRequestMessage(HttpMethod.Put, contentUrl);
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", bearerToken);
-        request.Content = new ByteArrayContent(pdfContent);
-        request.Content.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+        request.Content = new ByteArrayContent(content);
+        request.Content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
 
         using var response = await _httpClient.SendAsync(request, cancellationToken);
         response.EnsureSuccessStatusCode();
     }
 
-    private async Task UploadSessionAsync(string createSessionUrl, byte[] pdfContent, string bearerToken, CancellationToken cancellationToken)
+    private async Task UploadSessionAsync(string createSessionUrl, byte[] content, string contentType, string bearerToken, CancellationToken cancellationToken)
     {
         // Step 1: Create the upload session.
         using var createRequest = new HttpRequestMessage(HttpMethod.Post, createSessionUrl);
@@ -108,9 +201,8 @@ public class SharePointService : ISharePointService
         }
 
         // Step 2: Upload the content in Graph-compliant chunks.
-        // Each non-final chunk must be a multiple of 320 KiB as required by Microsoft Graph.
         const int chunkSize = UploadSessionChunkSize;
-        var totalBytes = pdfContent.Length;
+        var totalBytes = content.Length;
         var offset = 0;
 
         while (offset < totalBytes)
@@ -118,20 +210,18 @@ public class SharePointService : ISharePointService
             var length = Math.Min(chunkSize, totalBytes - offset);
 
             using var putRequest = new HttpRequestMessage(HttpMethod.Put, uploadUrl);
-            putRequest.Content = new ByteArrayContent(pdfContent, offset, length);
-            putRequest.Content.Headers.ContentType = new MediaTypeHeaderValue("application/pdf");
+            putRequest.Content = new ByteArrayContent(content, offset, length);
+            putRequest.Content.Headers.ContentType = new MediaTypeHeaderValue(contentType);
             putRequest.Content.Headers.ContentRange = new ContentRangeHeaderValue(offset, offset + length - 1, totalBytes);
 
             using var putResponse = await _httpClient.SendAsync(putRequest, cancellationToken);
 
             if ((int)putResponse.StatusCode == 202)
             {
-                // Parse nextExpectedRanges from the Graph response to get the confirmed next chunk offset.
                 offset = await GetNextExpectedOffsetAsync(putResponse, totalBytes, cancellationToken);
                 continue;
             }
 
-            // 200/201 = upload complete.
             putResponse.EnsureSuccessStatusCode();
             break;
         }
