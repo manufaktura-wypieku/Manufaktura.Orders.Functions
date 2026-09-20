@@ -240,6 +240,8 @@ public class DataverseServiceTests
         Assert.Contains("mb_orders", decodedUrl);
         Assert.Contains("2026-09-18T00:00:00Z", decodedUrl);
         Assert.Contains("2026-09-19T00:00:00Z", decodedUrl);
+        Assert.Contains($"mb_order_kind eq {OrderKind.Sale}", decodedUrl);
+        Assert.Contains("mb_order_kind eq null", decodedUrl);
         Assert.DoesNotContain("statecode", decodedUrl);
     }
 
@@ -258,6 +260,7 @@ public class DataverseServiceTests
         Assert.Equal(HttpMethod.Post, request.Method);
         Assert.Contains("/api/data/v9.2/mb_orders", request.Url);
         Assert.Contains("\"mb_deliverydate\":\"2026-09-18\"", request.Body);
+        Assert.Contains($"\"mb_order_kind\":{OrderKind.Sale}", request.Body);
         Assert.Contains($"\"mb_Customer_account@odata.bind\":\"/accounts({accountId:D})\"", request.Body);
         Assert.Contains($"\"mb_Pricelist@odata.bind\":\"/mb_pricelists({priceListId:D})\"", request.Body);
     }
